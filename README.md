@@ -1,4 +1,4 @@
-# Neural Hive
+# Neural Hive - Internet of AI (Decentralized)
 
 Neural Hive is a coordination layer for many small AI agents. A request is decomposed into steps, each step is routed to the agent best suited to it, the answers are aggregated in a way one bad actor cannot skew, and everyone involved is paid in HIVE. The agent registry, the reputation layer and the staking and payment logic are smart contracts deployed directly on Avalanche C-Chain, so every task is real on-chain activity on Avalanche instead of traffic on a private chain.
 
