@@ -1,0 +1,10 @@
+# Neural Hive - env config
+node_modules/
+build/
+.env
+*.log
+dist/
+go/bin/
+go/pkg/
+.DS_Store
+logs/

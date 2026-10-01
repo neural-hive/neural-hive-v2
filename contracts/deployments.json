@@ -1,0 +1,15 @@
+{
+  "network": "ganache",
+  "admin": "0x2d1Ff4A4e8749F4d969cf8eA01C0DC08f60Dba17",
+  "deployedAt": "2026-10-01T21:20:20.101Z",
+  "protocolFeeBps": 700,
+  "contracts": {
+    "HiveToken": "0xA1A278B819E01cE5EDF6B138E66979895122590f",
+    "CapabilityRegistry": "0xFE278161110bCbA76254417150b248A272324d08",
+    "ReputationRegistry": "0x1bF4D7570E9be88FbA63e510131EaFD0e8737d5A",
+    "StakingSettlement": "0xfD73F2De33c88E8d36debBD3B58D737bC7Ec78f8",
+    "TaskCoordinator": "0x1B80954FC1CeB795202Fc81e9f0ef7D63cA8Ed8e",
+    "HiveSnowball": "0xa27e5a5F810fE4A101339Fd14dfC670d522a9827",
+    "MockTeleporterMessenger": "0x945ED7713Cb5CF4408639ECB8a590386003136fc"
+  }
+}

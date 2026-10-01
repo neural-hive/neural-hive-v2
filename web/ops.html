@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Neural Hive - Agentic AI Workspace</title>
+<style>
+:root{
+  --bg:#070a14;--bg2:#0a0f1e;
+  --panel:rgba(20,27,48,.72);--panel2:rgba(13,18,34,.86);
+  --line:rgba(122,142,205,.18);--line2:rgba(122,142,205,.10);
+  --ink:#e9edfa;--muted:#93a2c6;--faint:#6b7aa0;
+  --blue:#5b7cfa;--purple:#a855f7;--cyan:#22d3ee;--pink:#f472b6;
+  --ok:#34d399;--bad:#f87171;--warn:#fbbf24;
+  --grad:linear-gradient(135deg,#5b7cfa 0%,#a855f7 52%,#22d3ee 100%);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%}
+body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:radial-gradient(1100px 620px at 8% -10%,rgba(91,124,250,.22) 0%,transparent 60%),radial-gradient(900px 520px at 100% 0%,rgba(168,85,247,.16) 0%,transparent 55%),radial-gradient(820px 600px at 50% 120%,rgba(34,211,238,.10) 0%,transparent 60%),var(--bg);background-attachment:fixed}
+::selection{background:rgba(124,92,255,.35)}
+.app{display:grid;grid-template-columns:272px 1fr;min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:14px;padding:20px 16px;border-right:1px solid var(--line2);background:linear-gradient(180deg,rgba(12,17,32,.92),rgba(8,12,24,.94));backdrop-filter:blur(14px);z-index:20}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 4px}
+.logo{width:34px;height:34px;border-radius:11px;background:var(--grad);box-shadow:0 0 22px rgba(124,92,255,.55);flex:none}
+.brand h1{font-size:16px;margin:0;letter-spacing:.2px}
+.brand .sub{font-size:11px;color:var(--faint);margin-top:2px}
+.new-task{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(124,92,255,.38);background:linear-gradient(135deg,rgba(91,124,250,.18),rgba(168,85,247,.18));color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:.18s}
+.new-task:hover{border-color:rgba(124,92,255,.7);box-shadow:0 0 18px rgba(124,92,255,.28)}
+.side-label{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:2px 6px}
+.task-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:2px}
+.task-item{padding:10px 11px;border-radius:11px;border:1px solid transparent;cursor:pointer;transition:.16s}
+.task-item:hover{background:rgba(122,142,205,.07)}
+.task-item.active{background:rgba(91,124,250,.13);border-color:rgba(122,142,205,.3)}
+.task-item .t{font-size:13px;font-weight:560;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-item .m{font-size:11px;color:var(--faint);margin-top:3px}
+.task-item.new .t{color:var(--muted);font-weight:500}
+.side-foot{border-top:1px solid var(--line2);padding-top:12px;display:flex;flex-direction:column;gap:7px}
+.net-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.net-meta{font-size:10.5px;color:var(--faint);line-height:1.55;word-break:break-all}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.dot.bad{background:var(--bad);box-shadow:0 0 10px var(--bad)}
+.main{display:flex;flex-direction:column;min-height:100vh}
+.topbar{position:sticky;top:0;z-index:6;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 32px;border-bottom:1px solid var(--line2);background:linear-gradient(180deg,rgba(7,10,20,.86),rgba(7,10,20,.55));backdrop-filter:blur(12px)}
+.top-left{display:flex;align-items:center;gap:12px;min-width:0}
+.top-title{font-size:15px;font-weight:640;max-width:52ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-sub{font-size:11.5px;color:var(--faint);margin-top:2px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;font-size:12px;background:var(--panel2);border:1px solid var(--line);white-space:nowrap}
+.menu-btn{display:none;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
+.thread{flex:1;width:100%;max-width:900px;margin:0 auto;padding:28px 32px 20px;display:flex;flex-direction:column;gap:26px}
+.empty{margin:auto;text-align:center;color:var(--muted);max-width:560px;padding:40px 10px}
+.empty .glyph{width:56px;height:56px;border-radius:16px;margin:0 auto 18px;background:var(--grad);box-shadow:0 0 34px rgba(124,92,255,.45)}
+.empty h2{font-size:19px;margin:0 0 8px;color:var(--ink)}
+.empty p{font-size:13px;line-height:1.6;margin:0 0 18px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.chip{padding:8px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:12.5px;cursor:pointer;transition:.16s}
+.chip:hover{color:var(--ink);border-color:rgba(122,142,205,.4);transform:translateY(-1px)}
+.msg{display:flex;flex-direction:column;gap:8px;animation:rise .28s ease}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);display:flex;align-items:center;gap:10px}
+.label .who{color:var(--muted)}
+.user-bubble{align-self:flex-start;max-width:80%;padding:13px 16px;border-radius:14px;background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.14));border:1px solid rgba(122,142,205,.26);font-size:14.5px;line-height:1.55;white-space:pre-wrap}
+.answer-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 14px 40px rgba(0,0,0,.32)}
+.prose{font-size:14.7px;line-height:1.72;color:#eef2fc}
+.prose p{margin:0 0 12px}
+.prose p:last-child{margin-bottom:0}
+.prose h1,.prose h2,.prose h3{margin:16px 0 9px;font-size:15.5px;line-height:1.4;color:#fff}
+.prose h1{font-size:17px}
+.prose ul,.prose ol{margin:0 0 12px;padding-left:22px}
+.prose li{margin:4px 0}
+.prose code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.8px;background:rgba(122,142,205,.14);padding:1.5px 6px;border-radius:6px;color:#cfe0ff}
+.prose pre{margin:0 0 12px;padding:13px 15px;border-radius:11px;background:#080c18;border:1px solid var(--line);overflow:auto}
+.prose pre code{background:none;padding:0;color:#d7e3ff;font-size:12.9px;line-height:1.6}
+.prose strong{color:#fff;font-weight:650}
+.prose em{color:#dbe4fb}
+.prose a{color:var(--cyan)}
+.exec{margin-top:16px;padding-top:14px;border-top:1px solid var(--line2)}
+.exec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.metric{background:var(--panel2);border:1px solid var(--line2);border-radius:11px;padding:10px 12px}
+.metric .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.metric .v{font-size:13px;margin-top:5px;word-break:break-all;color:var(--ink)}
+details.tech{margin-top:12px;border:1px solid var(--line2);border-radius:11px;background:rgba(8,12,24,.5);overflow:hidden}
+details.tech summary{cursor:pointer;list-style:none;padding:11px 14px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+details.tech summary::-webkit-details-marker{display:none}
+details.tech summary:before{content:"+ ";color:var(--cyan)}
+details.tech[open] summary:before{content:"- "}
+details.tech .body{padding:2px 14px 14px}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:6px 14px;font-size:12.3px;align-items:start}
+.kv .k{color:var(--faint)}
+.kv .v{color:var(--ink);word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+table.steps{width:100%;border-collapse:collapse;font-size:11.8px;margin-top:12px}
+table.steps th,table.steps td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line2);white-space:nowrap}
+table.steps th{color:var(--faint);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;border:1px solid var(--line)}
+.tag.ok{color:var(--ok);border-color:rgba(52,211,153,.4)}
+.tag.bad{color:var(--bad);border-color:rgba(248,113,113,.4)}
+.tag.warn{color:var(--warn);border-color:rgba(251,191,36,.4)}
+.working{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13.5px}
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(122,142,205,.28);border-top-color:var(--cyan);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pulse{display:inline-flex;gap:4px;margin-left:2px}
+.pulse i{width:5px;height:5px;border-radius:50%;background:var(--cyan);opacity:.35;animation:pulse 1.2s infinite}
+.pulse i:nth-child(2){animation-delay:.18s}
+.pulse i:nth-child(3){animation-delay:.36s}
+@keyframes pulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+.elapsed{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.errbox{border:1px solid rgba(248,113,113,.4);background:rgba(248,113,113,.08);border-radius:12px;padding:13px 15px;color:#ffd7d7;font-size:13px;line-height:1.55}
+.errbox .ttl{color:var(--bad);font-weight:650;margin-bottom:5px;font-size:12.5px}
+.composer{position:sticky;bottom:0;z-index:6;width:100%;max-width:900px;margin:0 auto;padding:10px 32px 24px}
+.composer-box{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:12px 14px;box-shadow:0 -6px 30px rgba(0,0,0,.35);backdrop-filter:blur(12px)}
+textarea{width:100%;background:transparent;border:none;outline:none;color:var(--ink);font:inherit;font-size:14.5px;line-height:1.5;resize:none;min-height:26px;max-height:180px}
+textarea::placeholder{color:var(--faint)}
+.composer-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
+.adv{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.adv label{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--faint);cursor:pointer}
+.adv input,.adv select{background:#0b1120;border:1px solid var(--line);border-radius:8px;color:var(--muted);padding:4px 6px;font:inherit;font-size:11px}
+.adv input[type=number]{width:54px}
+.adv input[type=checkbox]{accent-color:var(--purple)}
+button.send{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:11px;border:none;background:var(--grad);color:#080c18;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;transition:.18s}
+button.send:hover{box-shadow:0 0 22px rgba(124,92,255,.5)}
+button.send:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+@media (max-width:900px){.app{grid-template-columns:1fr}.sidebar{position:fixed;left:0;top:0;width:272px;transform:translateX(-100%);transition:.22s}.sidebar.open{transform:none}.thread{padding:20px 16px}.composer{padding:10px 16px 20px}.topbar{padding:14px 16px}.menu-btn{display:inline-flex}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo"></div>
+      <div><h1>Neural Hive</h1><div class="sub">Agentic AI workspace</div></div>
+    </div>
+    <button class="new-task" id="newTask">+ New Task</button>
+    <div class="side-label">History</div>
+    <div class="task-list" id="taskList"></div>
+    <div class="side-foot">
+      <div class="net-row"><span class="dot" id="netDot"></span><span id="netText">connecting to coordinator...</span></div>
+      <div class="net-meta" id="netMeta"></div>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="menu-btn" id="menuBtn">&#9776;</button>
+        <div>
+          <div class="top-title" id="convTitle">New task</div>
+          <div class="top-sub" id="convSub">Neural Hive agent execution - Avalanche devnet</div>
+        </div>
+      </div>
+      <div class="pill"><span class="dot" id="healthDot"></span><span id="healthText">connecting...</span></div>
+    </header>
+    <div class="thread" id="thread"></div>
+    <div class="composer">
+      <div class="composer-box">
+        <textarea id="input" rows="1" placeholder="Ask Neural Hive..."></textarea>
+        <div class="composer-row">
+          <div class="adv">
+            <label>Committee <input id="replication" type="number" min="1" max="64" value="5" /></label>
+            <label>Tier <select id="tier"><option value="0">optimistic</option><option value="1" selected>replicated Krum</option><option value="2">zkML</option></select></label>
+            <label><input id="forceBandit" type="checkbox" /> bandit</label>
+            <label><input id="byzantine" type="checkbox" /> byzantine</label>
+          </div>
+          <button class="send" id="send">Send</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+var LSKEY = `neuralhive.workspace.v1`;
+var SUGGESTIONS = [
+  `What is distributed consensus?`,
+  `Explain how Krum aggregation resists a lying agent.`,
+  `Summarize the tradeoffs of optimistic verification.`
+];
+var state = { tasks: [], activeId: null };
+var running = false;
+
+function $(id){ return document.getElementById(id); }
+
+function esc(s){
+  var A = String.fromCharCode(38);
+  var t = (s === null || s === undefined) ? `` : String(s);
+  return t.replace(/&/g, A + `amp;`).replace(/</g, A + `lt;`).replace(/>/g, A + `gt;`);
+}
+
+function load(){
+  try {
+    var raw = localStorage.getItem(LSKEY);
+    if (raw) { var p = JSON.parse(raw); if (p && p.tasks && p.tasks.length !== undefined) { state = p; } }
+  } catch (e) {}
+  if (!state.activeId && state.tasks.length) { state.activeId = state.tasks[0].id; }
+}
+function save(){ try { localStorage.setItem(LSKEY, JSON.stringify(state)); } catch (e) {} }
+function activeTask(){ for (var i = 0; i < state.tasks.length; i++) { if (state.tasks[i].id === state.activeId) return state.tasks[i]; } return null; }
+function uid(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function closeMenu(){ $(`sidebar`).classList.remove(`open`); }
+
+function inline(t){
+  var s = esc(t);
+  s = s.replace(/\`([^\`]+)\`/g, `<code>$1</code>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, `<strong>$1</strong>`);
+  s = s.replace(/\*([^*]+)\*/g, `<em>$1</em>`);
+  return s;
+}
+
+function renderMD(text){
+  var src = (text === null || text === undefined) ? `` : String(text);
+  var lines = src.replace(/\r\n/g, `\n`).split(`\n`);
+  var out = []; var i = 0;
+  function isBullet(l){ return /^\s*[-*]\s+/.test(l); }
+  function isNum(l){ return /^\s*\d+\.\s+/.test(l); }
+  function isHead(l){ return /^#{1,3}\s+/.test(l); }
+  function isFence(l){ return /^```/.test(l); }
+  while (i < lines.length) {
+    var ln = lines[i];
+    if (isFence(ln)) {
+      i++; var buf = [];
+      while (i < lines.length && !isFence(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      out.push(`<pre><code>` + esc(buf.join(`\n`)) + `</code></pre>`);
+      continue;
+    }
+    var m = ln.match(/^(#{1,3})\s+(.*)$/);
+    if (m) { var lvl = m[1].length; out.push(`<h` + lvl + `>` + inline(m[2]) + `</h` + lvl + `>`); i++; continue; }
+    if (isBullet(ln)) {
+      var li = [];
+      while (i < lines.length && isBullet(lines[i])) { li.push(`<li>` + inline(lines[i].replace(/^\s*[-*]\s+/, ``)) + `</li>`); i++; }
+      out.push(`<ul>` + li.join(``) + `</ul>`); continue;
+    }
+    if (isNum(ln)) {
+      var lo = [];
+      while (i < lines.length && isNum(lines[i])) { lo.push(`<li>` + inline(lines[i].replace(/^\s*\d+\.\s+/, ``)) + `</li>`); i++; }
+      out.push(`<ol>` + lo.join(``) + `</ol>`); continue;
+    }
+    if (ln.trim() === ``) { i++; continue; }
+    var para = [];
+    while (i < lines.length && lines[i].trim() !== `` && !isHead(lines[i]) && !isFence(lines[i]) && !isBullet(lines[i]) && !isNum(lines[i])) { para.push(lines[i]); i++; }
+    out.push(`<p>` + inline(para.join(`<br>`)) + `</p>`);
+  }
+  return out.join(``);
+}
+function metric(k, v){ return `<div class='metric'><div class='k'>` + esc(k) + `</div><div class='v'>` + esc(v === null || v === undefined ? `-` : v) + `</div></div>`; }
+function kv(k, v){ return `<div class='k'>` + esc(k) + `</div><div class='v'>` + esc(v === null || v === undefined || v === `` ? `-` : v) + `</div>`; }
+function tx(h){ if (!h || typeof h !== `string`) { return `-`; } if (h.length <= 22) { return esc(h); } return esc(h.slice(0, 12) + `...` + h.slice(-8)); }
+function fmt(x, n){ if (typeof x !== `number`) { return (x === null || x === undefined || x === ``) ? `-` : x; } return x.toFixed(n === undefined ? 4 : n); }
+
+function stepsTable(steps){
+  if (!steps || !steps.length) { return ``; }
+  var STATUS = { 0: `pending`, 1: `collecting`, 2: `finalized`, 3: `failed` };
+  var h = `<table class='steps'><thead><tr><th>Step</th><th>Kind</th><th>Route</th><th>Responses</th><th>Consensus</th><th>Payout</th><th>Status</th><th>Finalize tx</th></tr></thead><tbody>`;
+  for (var i = 0; i < steps.length; i++) {
+    var s = steps[i];
+    var st = STATUS[s.status] || (`#` + s.status);
+    var cls = s.status === 2 ? `ok` : (s.status === 3 ? `bad` : `warn`);
+    var cons = (s.consensusValue === null || s.consensusValue === undefined || s.consensusValue === ``) ? `-` : s.consensusValue;
+    h += `<tr><td>` + esc(s.stepId) + `</td><td>` + esc(s.kind) + `</td><td>` + esc(s.routeMode) + `</td><td>` + esc(s.responses) + `</td><td>` + esc(cons) + `</td><td>` + esc(fmt(s.payoutHive, 4)) + `</td><td><span class='tag ` + cls + `'>` + esc(st) + `</span></td><td>` + tx(s.finalizeTx) + `</td></tr>`;
+  }
+  return h + `</tbody></table>`;
+}
+
+function techHTML(r){
+  var h = `<details class='tech'><summary>Technical details and on-chain evidence</summary><div class='body'>`;
+  h += `<div class='kv'>`;
+  h += kv(`Request ID`, r.requestId);
+  h += kv(`Answer hash`, r.answerHash);
+  h += kv(`Request tx`, r.requestTx);
+  h += kv(`Settlement tx`, r.settleTx);
+  h += kv(`Network`, r.network);
+  h += kv(`Chain ID`, r.chainId);
+  h += kv(`Coordinator contract`, r.coordinatorContract);
+  h += kv(`Answer agent`, r.answerAgentEndpoint);
+  h += kv(`Route modes`, JSON.stringify(r.routeModes || {}));
+  h += kv(`Budget (HIVE)`, fmt(r.budgetHive, 6));
+  h += kv(`Spent (HIVE)`, fmt(r.spentHive, 6));
+  h += kv(`Refunded (HIVE)`, fmt(r.refundedHive, 6));
+  h += kv(`Price of anarchy`, fmt(r.priceOfAnarchy, 3));
+  h += `</div>`;
+  h += stepsTable(r.steps);
+  if (r.answerError) { h += `<div class='net-meta'>answer note: ` + esc(r.answerError) + `</div>`; }
+  return h + `</div></details>`;
+}
+function answerHTML(r){
+  var h = `<div class='answer-card'>`;
+  if (r.answer) {
+    h += `<div class='prose'>` + renderMD(r.answer) + `</div>`;
+  } else {
+    h += `<div class='errbox'><div class='ttl'>No natural-language answer was produced</div>` + esc(r.answerError || `The answer agent did not return prose for this request.`) + `</div>`;
+  }
+  h += `<div class='exec'><div class='exec-grid'>`;
+  h += metric(`Agent`, r.answeredBy || r.answerAgentEndpoint || `-`);
+  h += metric(`Provider`, r.provider || `-`);
+  h += metric(`Model`, r.model || `-`);
+  h += metric(`Duration`, (r.elapsedMs === null || r.elapsedMs === undefined) ? `-` : (r.elapsedMs / 1000).toFixed(2) + ` s`);
+  h += metric(`Request`, `#` + r.requestId);
+  h += metric(`Steps`, (r.steps || []).length);
+  h += `</div>`;
+  h += techHTML(r);
+  h += `</div></div>`;
+  return h;
+}
+
+function exchangeHTML(ex){
+  var h = `<div class='msg'><div class='label'><span class='who'>You</span></div><div class='user-bubble'>` + esc(ex.q) + `</div></div>`;
+  h += `<div class='msg'><div class='label'><span class='who'>DeepSeek Agent</span></div>`;
+  if (ex.status === `running`) {
+    h += `<div class='answer-card'><div class='working'><span class='spinner'></span><span>Neural Hive is routing the request and generating an answer<span class='pulse'><i></i><i></i><i></i></span></span><span class='elapsed' data-elapsed='` + ex.id + `'>0.0s</span></div></div>`;
+  } else if (ex.status === `error`) {
+    h += `<div class='errbox'><div class='ttl'>DeepSeek request failed</div>` + esc(ex.error) + `<div class='net-meta'>No answer was fabricated. Neural Hive surfaces the real provider error instead of falling back to a mock response.</div></div>`;
+  } else if (ex.result) {
+    h += answerHTML(ex.result);
+  }
+  h += `</div>`;
+  return h;
+}
+
+function emptyState(){
+  var chips = ``;
+  for (var i = 0; i < SUGGESTIONS.length; i++) { chips += `<span class='chip' data-chip='` + i + `'>` + esc(SUGGESTIONS[i]) + `</span>`; }
+  return `<div class='empty'><div class='glyph'></div><h2>Ask Neural Hive anything</h2><p>Your request is decomposed, routed to the right agents and answered by the DeepSeek agent, with the execution hash recorded on-chain as evidence.</p><div class='chips'>` + chips + `</div></div>`;
+}
+
+function renderThread(){
+  var t = activeTask();
+  var th = $(`thread`);
+  if (!t || !t.exchanges.length) { th.innerHTML = emptyState(); bindChips(); return; }
+  var h = ``;
+  for (var i = 0; i < t.exchanges.length; i++) { h += exchangeHTML(t.exchanges[i]); }
+  th.innerHTML = h;
+}
+
+function bindChips(){
+  var chips = document.querySelectorAll(`[data-chip]`);
+  for (var i = 0; i < chips.length; i++) {
+    chips[i].onclick = function(){
+      var idx = parseInt(this.getAttribute(`data-chip`), 10) || 0;
+      $(`input`).value = SUGGESTIONS[idx] || ``;
+      autoGrow(); $(`input`).focus(); closeMenu();
+    };
+  }
+}
+function renderSidebar(){
+  var t = activeTask();
+  $(`convTitle`).textContent = t ? t.title : `New task`;
+  var list = $(`taskList`);
+  if (!state.tasks.length) {
+    list.innerHTML = `<div class='task-item new'><div class='t'>No tasks yet</div><div class='m'>Start with New Task</div></div>`;
+    return;
+  }
+  var h = ``;
+  for (var i = 0; i < state.tasks.length; i++) {
+    var tk = state.tasks[i];
+    var active = tk.id === state.activeId ? ` active` : ``;
+    var n = tk.exchanges.length;
+    var when = new Date(tk.createdAt).toLocaleString();
+    h += `<div class='task-item` + active + `' data-task='` + tk.id + `'><div class='t'>` + esc(tk.title) + `</div><div class='m'>` + n + (n === 1 ? ` query` : ` queries`) + ` - ` + esc(when) + `</div></div>`;
+  }
+  list.innerHTML = h;
+  var items = list.querySelectorAll(`[data-task]`);
+  for (var j = 0; j < items.length; j++) {
+    items[j].onclick = function(){ state.activeId = this.getAttribute(`data-task`); save(); render(); closeMenu(); };
+  }
+}
+
+function render(){ renderSidebar(); renderThread(); }
+
+function newTask(){
+  var t = { id: uid(`t`), title: `New task`, createdAt: Date.now(), exchanges: [] };
+  state.tasks.unshift(t);
+  state.activeId = t.id;
+  save(); render();
+  $(`input`).focus();
+}
+
+function autoGrow(){ var el = $(`input`); el.style.height = `auto`; el.style.height = Math.min(el.scrollHeight, 180) + `px`; }
+
+function submit(){
+  if (running) { return; }
+  var q = $(`input`).value.trim();
+  if (!q) { return; }
+  var t = activeTask();
+  if (!t) { newTask(); t = activeTask(); }
+  var ex = { id: uid(`e`), q: q, status: `running`, startedAt: Date.now(), result: null, error: null };
+  t.exchanges.push(ex);
+  if (t.exchanges.length === 1) { t.title = q.length > 70 ? q.slice(0, 70) + `...` : q; }
+  state.activeId = t.id;
+  $(`input`).value = ``;
+  autoGrow();
+  running = true;
+  save(); render();
+  var t0 = Date.now();
+  var timer = setInterval(function(){
+    var el = document.querySelector(`[data-elapsed='` + ex.id + `']`);
+    if (el) { el.textContent = ((Date.now() - t0) / 1000).toFixed(1) + `s`; }
+  }, 100);
+  var payload = { request: q, replication: parseInt($(`replication`).value, 10) || 5, tier: parseInt($(`tier`).value, 10) || 0, forceBandit: $(`forceBandit`).checked, byzantine: $(`byzantine`).checked, relayerUrl: `http://127.0.0.1:9300` };
+  fetch(`/run`, { method: `POST`, headers: { [`Content-Type`]: `application/json` }, body: JSON.stringify(payload) })
+    .then(function(res){ return res.text().then(function(text){ return { ok: res.ok, status: res.status, text: text }; }); })
+    .then(function(r){
+      var data = {};
+      try { data = r.text ? JSON.parse(r.text) : {}; } catch (e) { data = { error: r.text }; }
+      if (!r.ok || data.error) { throw new Error(data.error ? data.error : (`HTTP ` + r.status)); }
+      ex.result = data; ex.status = `done`;
+    })
+    .catch(function(e){ ex.status = `error`; ex.error = (e && e.message) ? e.message : String(e); })
+    .then(function(){ clearInterval(timer); ex.endedAt = Date.now(); running = false; save(); render(); });
+}
+function poll(){
+  fetch(`/health`).then(function(r){ return r.json(); }).then(function(h){
+    $(`netDot`).className = `dot ok`;
+    $(`healthDot`).className = `dot ok`;
+    $(`healthText`).textContent = `Online`;
+    $(`netText`).textContent = `Coordinator online`;
+    $(`netMeta`).textContent = `answer agent: ` + (h.answerAgent || `not designated`);
+  }).catch(function(){
+    $(`netDot`).className = `dot bad`;
+    $(`healthDot`).className = `dot bad`;
+    $(`healthText`).textContent = `Offline`;
+    $(`netText`).textContent = `Coordinator offline`;
+  });
+  fetch(`/agents`).then(function(r){ return r.json(); }).then(function(a){
+    $(`netMeta`).textContent = `agents: ` + a.count + ` | route: ` + a.routeMode + ` | PoA: ` + (typeof a.priceOfAnarchy === `number` ? a.priceOfAnarchy.toFixed(2) : `-`);
+  }).catch(function(){});
+}
+
+$(`newTask`).onclick = function(){ newTask(); closeMenu(); };
+$(`send`).onclick = submit;
+$(`input`).addEventListener(`input`, autoGrow);
+$(`input`).addEventListener(`keydown`, function(e){ if (e.key === `Enter` && !e.shiftKey) { e.preventDefault(); submit(); } });
+$(`menuBtn`).onclick = function(){ $(`sidebar`).classList.toggle(`open`); };
+load();
+if (!state.tasks.length) { newTask(); } else { render(); }
+autoGrow();
+poll();
+setInterval(poll, 8000);
+</script>
+</body>
+</html>

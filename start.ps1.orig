@@ -1,0 +1,309 @@
+<#
+.SYNOPSIS
+    Neural Hive - build, deploy, start and verify the whole protocol on a local Ganache devnet.
+
+.DESCRIPTION
+    Requires an already-running Ganache on http://127.0.0.1:8545 (chain id 1337).
+    This script never starts a blockchain node.
+
+    Stages: prerequisites -> Ganache check -> .env -> compile contracts -> Go unit tests ->
+    contract tests -> redeploy -> build binaries -> start agents, relayer and coordinator ->
+    end-to-end protocol scenarios -> summary.
+
+.PARAMETER SkipContractTests
+    Skip the Truffle contract test suite.
+
+.PARAMETER SkipGoTests
+    Skip the Go unit test suite.
+
+.PARAMETER NoStart
+    Deploy, test and report, but stop the services again before exiting.
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\start.ps1
+#>
+[CmdletBinding()]
+param(
+    [switch]$SkipContractTests,
+    [switch]$SkipGoTests,
+    [switch]$NoStart
+)
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$Root = $PSScriptRoot
+if (-not $Root) { $Root = (Get-Location).Path }
+$ContractsDir = Join-Path $Root "contracts"
+$GoDir = Join-Path $Root "go"
+$BinDir = Join-Path $GoDir "bin"
+$WebDir = Join-Path $Root "web"
+$LogDir = Join-Path $Root "logs"
+$RpcUrl = "http://127.0.0.1:8545"
+$ChainIdHex = "0x539"  # 1337
+
+$script:Results = @()
+$script:Failed = 0
+$script:Started = @()
+$script:TruffleExe = $null
+$script:TrufflePrefix = @()
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+("Neural Hive implementation log " + (Get-Date).ToString("s") + ": multi-agent DeepSeek Hub; configurable agent pool (HIVE_AGENT_COUNT); capability-tag routing; reputation/risk scoring; concurrent subtask execution; LLM aggregation; on-chain answer anchoring.") | Set-Content -Path (Join-Path $LogDir "implementation.log")
+
+function Write-Stage { param([string]$Name) Write-Host ""; Write-Host ("=== " + $Name + " ===") -ForegroundColor Cyan }
+function Write-Info { param([string]$Message) Write-Host ("   " + $Message) }
+
+function Add-Result {
+    param([string]$Name, [bool]$Ok, [string]$Detail)
+    $script:Results += [pscustomobject]@{ Stage = $Name; Ok = $Ok; Detail = $Detail }
+    if ($Ok) { Write-Host ("   [PASS] " + $Name + " :: " + $Detail) -ForegroundColor Green }
+    else { $script:Failed++; Write-Host ("   [FAIL] " + $Name + " :: " + $Detail) -ForegroundColor Red }
+}
+
+function Invoke-Step {
+    param([string]$Name, [string]$File, [string[]]$CmdArgs, [string]$WorkDir)
+    Write-Info ($File + " " + ($CmdArgs -join " "))
+    Push-Location $WorkDir
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { $output = & $File @CmdArgs 2>&1 | ForEach-Object { $_.ToString() }; $code = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prevEap; Pop-Location }
+    foreach ($line in $output) { Write-Host ("      " + $line) }
+    Add-Result $Name ($code -eq 0) ("exit code " + $code)
+    return ($code -eq 0)
+}
+
+function Test-Command { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($raw in Get-Content $Path) {
+        $line = $raw.Trim()
+        if ($line -eq "" -or $line.StartsWith("#")) { continue }
+        $i = $line.IndexOf("=")
+        if ($i -lt 1) { continue }
+        $k = $line.Substring(0, $i).Trim()
+        $v = $line.Substring($i + 1).Trim()
+        [Environment]::SetEnvironmentVariable($k, $v, "Process")
+    }
+}
+
+function Get-Rpc {
+    param([string]$Method, [object[]]$Params)
+    $body = @{ jsonrpc = "2.0"; id = 1; method = $Method; params = $Params } | ConvertTo-Json -Compress -Depth 5
+    return Invoke-RestMethod -Uri $RpcUrl -Method Post -ContentType "application/json" -Body $body -TimeoutSec 8
+}
+
+function Wait-Http {
+    param([string]$Url, [int]$TimeoutSec)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
+            if ($r.StatusCode -eq 200) { return $true }
+        } catch { Start-Sleep -Milliseconds 400 }
+    }
+    return $false
+}
+
+function Stop-NeuralHiveProcesses {
+    foreach ($name in @("coordinator", "relayer", "agent", "deepseek-agent", "hive-agents", "hub", "e2e")) {
+        Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Info ("stopping stale " + $name + " pid " + $_.Id)
+            try { $_.Kill() } catch { }
+        }
+    }
+    Start-Sleep -Milliseconds 600
+}
+
+function Start-HiveProcess {
+    param([string]$Name, [string]$File, [string[]]$CmdArgs, [string]$WorkDir, [string]$LogName = "")
+    if ($LogName) { $stdout = Join-Path $LogDir ($LogName + ".log") } else { $stdout = Join-Path $LogDir ($Name + ".out.log") }
+    $stderr = Join-Path $LogDir ($Name + ".err.log")
+    $p = Start-Process -FilePath $File -ArgumentList $CmdArgs -WorkingDirectory $WorkDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    $script:Started += $p
+    Write-Info ("started " + $Name + " (pid " + $p.Id + ") -> " + $stdout)
+    return $p
+}
+
+Write-Host ""
+Write-Host "Neural Hive :: local end-to-end verification" -ForegroundColor Magenta
+Write-Info ("repository root: " + $Root)
+
+Write-Stage "1/9 Prerequisites"
+$prereqOk = $true
+foreach ($c in @("node", "go")) {
+    if (Test-Command $c) {
+        $ver = if ($c -eq 'go') { (& go version 2>&1 | Select-Object -First 1) } else { (& $c --version 2>&1 | Select-Object -First 1) }
+        Add-Result ("prerequisite " + $c) $true ([string]$ver)
+    } else {
+        Add-Result ("prerequisite " + $c) $false "not found on PATH"
+        $prereqOk = $false
+    }
+}
+if (Test-Command "truffle") { $script:TruffleExe = "truffle"; $script:TrufflePrefix = @() }
+else { $script:TruffleExe = "npx"; $script:TrufflePrefix = @("truffle") }
+Add-Result "prerequisite truffle" ($null -ne (Get-Command $script:TruffleExe -ErrorAction SilentlyContinue)) ($script:TruffleExe + " " + ($script:TrufflePrefix -join " "))
+if (-not $prereqOk) { Write-Host "missing prerequisites; aborting" -ForegroundColor Red; exit 1 }
+
+Write-Stage "2/9 Ganache connectivity"
+try {
+    $chain = Get-Rpc "eth_chainId" @()
+    Add-Result "ganache rpc" ($chain.result -eq $ChainIdHex) ("chainId " + $chain.result + " at " + $RpcUrl)
+} catch {
+    Add-Result "ganache rpc" $false $_.Exception.Message
+    Write-Host "Ganache is not reachable. Start it first; this script never starts a node." -ForegroundColor Red
+    exit 1
+}
+
+Write-Stage "3/9 Environment"
+$envFile = Join-Path $Root ".env"
+if (-not (Test-Path $envFile)) {
+    $example = Join-Path $Root ".env.example"
+    if (Test-Path $example) { Copy-Item $example $envFile }
+    Add-Result ".env" $false "missing; created from .env.example - fill in PRIVATE_KEY_1 and PRIVATE_KEY_2 then re-run"
+    exit 1
+}
+Import-DotEnv $envFile
+$RelayerUrl = $env:RELAYER_URL
+if (-not $RelayerUrl) { $RelayerUrl = "http://127.0.0.1:9300" }
+$CoordinatorUrl = $env:COORDINATOR_API_URL
+if (-not $CoordinatorUrl) { $CoordinatorUrl = "http://127.0.0.1:9200" }
+Add-Result ".env loaded" $true $envFile
+try {
+    $accounts = (Get-Rpc "eth_accounts" @()).result
+    $addr1 = $env:ADDRESS_1
+    if ($addr1) {
+        $found = $false
+        foreach ($a in $accounts) { if ($a.ToLower() -eq $addr1.ToLower()) { $found = $true } }
+        Add-Result "ADDRESS_1 is a known ganache account" $found $addr1
+    }
+} catch { Add-Result "ADDRESS_1 is a known ganache account" $false $_.Exception.Message }
+
+Write-Stage "4/9 Compile contracts"
+Invoke-Step "truffle compile" $script:TruffleExe ($script:TrufflePrefix + @("compile")) $ContractsDir | Out-Null
+
+Write-Stage "5/9 Go unit tests"
+if ($SkipGoTests) { Write-Info "skipped (-SkipGoTests)" } else { Invoke-Step "go test ./..." "go" @("test", "./...") $GoDir | Out-Null }
+
+Write-Stage "6/9 Contract tests"
+Invoke-Step "truffle migrate --reset (prepare the test network)" $script:TruffleExe ($script:TrufflePrefix + @("migrate", "--reset", "--network", "ganache")) $ContractsDir | Out-Null
+if ($SkipContractTests) { Write-Info "skipped (-SkipContractTests)" } else { Invoke-Step "truffle test --network ganache" $script:TruffleExe ($script:TrufflePrefix + @("test", "--network", "ganache")) $ContractsDir | Out-Null }
+
+Write-Stage "7/9 Deploy and build"
+Invoke-Step "truffle migrate --reset --network ganache" $script:TruffleExe ($script:TrufflePrefix + @("migrate", "--reset", "--network", "ganache")) $ContractsDir | Out-Null
+$deployFile = Join-Path $ContractsDir "deployments.json"
+Add-Result "deployments.json written" (Test-Path $deployFile) $deployFile
+if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir | Out-Null }
+Invoke-Step "build agent" "go" @("build", "-o", (Join-Path $BinDir "agent.exe"), "./cmd/agent") $GoDir | Out-Null
+Invoke-Step "build relayer" "go" @("build", "-o", (Join-Path $BinDir "relayer.exe"), "./cmd/relayer") $GoDir | Out-Null
+Invoke-Step "build coordinator" "go" @("build", "-o", (Join-Path $BinDir "coordinator.exe"), "./cmd/coordinator") $GoDir | Out-Null
+Invoke-Step "build e2e" "go" @("build", "-o", (Join-Path $BinDir "e2e.exe"), "./cmd/e2e") $GoDir | Out-Null
+Invoke-Step "build deepseek-agent" "go" @("build", "-o", (Join-Path $BinDir "deepseek-agent.exe"), "./cmd/deepseek-agent") $GoDir | Out-Null
+Invoke-Step "build hive-agent" "go" @("build", "-o", (Join-Path $BinDir "hive-agent.exe"), "./cmd/hive-agent") $GoDir | Out-Null
+Invoke-Step "build hive-agents" "go" @("build", "-o", (Join-Path $BinDir "hive-agents.exe"), "./cmd/hive-agents") $GoDir | Out-Null
+Invoke-Step "build hub" "go" @("build", "-o", (Join-Path $BinDir "hub.exe"), "./cmd/hub") $GoDir | Out-Null
+Add-Result "dashboard assets" (Test-Path (Join-Path $WebDir "index.html")) (Join-Path $WebDir "index.html")
+
+Write-Stage "8/9 Start services"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+Stop-NeuralHiveProcesses
+$agentSkills = @("risk-scoring,anomaly-detection", "explain,summarization", "compliance,moderation", "market-data,trading-signal", "smart-contract-audit,code-review")
+for ($i = 0; $i -lt $agentSkills.Count; $i++) {
+    $port = 9101 + $i
+    Start-HiveProcess ("agent" + ($i + 1)) (Join-Path $BinDir "agent.exe") @("-index", $i, "-port", $port, "-skills", $agentSkills[$i], "-mode", "honest") $GoDir | Out-Null
+}
+$deepseekAgentUrl = $env:DEEPSEEK_AGENT_URL
+if (-not $deepseekAgentUrl) { $deepseekAgentUrl = "http://127.0.0.1:9107" }
+$deepseekIndex = $env:DEEPSEEK_AGENT_INDEX
+if (-not $deepseekIndex) { $deepseekIndex = "6" }
+if ($env:DEEPSEEK_API_KEY) {
+    Start-HiveProcess "deepseek-agent" (Join-Path $BinDir "deepseek-agent.exe") @("-index", $deepseekIndex, "-port", "9107", "-skills", "explain,summarization,reasoning", "-mode", "honest") $GoDir | Out-Null
+} else {
+    Write-Info "DEEPSEEK_API_KEY not set; the DeepSeek agent will not be started"
+}
+Start-HiveProcess "hive-agents" (Join-Path $BinDir "hive-agents.exe") @() $GoDir "agents" | Out-Null
+Start-HiveProcess "hub" (Join-Path $BinDir "hub.exe") @("-port", "9500") $GoDir "hub" | Out-Null
+Start-HiveProcess "relayer" (Join-Path $BinDir "relayer.exe") @("-port", "9300") $GoDir | Out-Null
+Start-HiveProcess "coordinator" (Join-Path $BinDir "coordinator.exe") @("-port", "9200") $GoDir "backend" | Out-Null
+
+$agentsHealthy = $true
+for ($i = 0; $i -lt $agentSkills.Count; $i++) {
+    $url = "http://127.0.0.1:" + (9101 + $i) + "/health"
+    $ok = Wait-Http $url 40
+    if (-not $ok) { $agentsHealthy = $false }
+    Add-Result ("agent " + ($i + 1) + " health") $ok $url
+}
+$relayerOk = Wait-Http ($RelayerUrl + "/health") 40
+Add-Result "relayer health" $relayerOk ($RelayerUrl + "/health")
+$coordOk = Wait-Http ($CoordinatorUrl + "/health") 40
+Add-Result "coordinator health" $coordOk ($CoordinatorUrl + "/health")
+if ($env:DEEPSEEK_API_KEY) {
+    $dsOk = Wait-Http ($deepseekAgentUrl + "/health") 40
+    Add-Result "deepseek-agent health" $dsOk ($deepseekAgentUrl + "/health")
+$hubUrl = "http://127.0.0.1:9500"
+$hubOk = Wait-Http ($hubUrl + "/health") 40
+Add-Result "hub health" $hubOk ($hubUrl + "/health")
+for ($i = 1; $i -le 5; $i++) {
+    $u = "http://127.0.0.1:" + (9400 + $i) + "/health"
+    Add-Result ("hive-agent " + $i + " health") (Wait-Http $u 40) $u
+}
+}
+$bootstrapBody = @{ count = 5; priceHive = 0.02 } | ConvertTo-Json -Compress
+try {
+    Invoke-RestMethod -Uri ($CoordinatorUrl + "/bootstrap") -Method Post -ContentType "application/json" -Body $bootstrapBody -TimeoutSec 180 | Out-Null
+    Add-Result "bootstrap seed + DeepSeek agents" $true ("POST " + $CoordinatorUrl + "/bootstrap")
+} catch {
+    Add-Result "bootstrap seed + DeepSeek agents" $false $_.Exception.Message
+}
+
+Write-Stage "9/9 End-to-end protocol scenarios"
+if ($agentsHealthy -and $relayerOk) {
+    Push-Location $GoDir
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { $e2eOut = & (Join-Path $BinDir "e2e.exe") 2>&1 | ForEach-Object { $_.ToString() }; $e2eCode = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prevEap; Pop-Location }
+    foreach ($line in $e2eOut) { Write-Host ("      " + $line) }
+    $e2eLog = Join-Path $LogDir "e2e.log"
+    $e2eOut | Set-Content -Path $e2eLog
+    Add-Result "go e2e (all protocol scenarios)" ($e2eCode -eq 0) ("exit code " + $e2eCode + "; " + $e2eLog)
+} else {
+    "agents or relayer are not healthy" | Set-Content -Path (Join-Path $LogDir "e2e.log")
+    Add-Result "go e2e (all protocol scenarios)" $false "agents or relayer are not healthy"
+}
+
+Write-Host ""
+$errOut = Join-Path $LogDir "errors.log"
+("Neural Hive aggregated error log " + (Get-Date).ToString("s")) | Set-Content -Path $errOut
+foreach ($ef in (Get-ChildItem -Path $LogDir -Filter "*.err.log" -ErrorAction SilentlyContinue)) {
+    $content = Get-Content $ef -ErrorAction SilentlyContinue
+    if ($content) { ("--- " + $ef.Name + " ---") | Add-Content -Path $errOut; $content | Add-Content -Path $errOut }
+}
+Write-Host "================ SUMMARY ================" -ForegroundColor Magenta
+foreach ($r in $script:Results) {
+    $colour = if ($r.Ok) { "Green" } else { "Red" }
+    $tag = if ($r.Ok) { "[PASS]" } else { "[FAIL]" }
+    Write-Host ($tag.PadRight(7) + $r.Stage.PadRight(46) + $r.Detail) -ForegroundColor $colour
+}
+Write-Host ""
+if ($script:Failed -eq 0) {
+    Write-Host ("ALL STAGES PASSED (" + $script:Results.Count + " checks)") -ForegroundColor Green
+} else {
+    Write-Host ("WARNING: " + $script:Failed + " of " + $script:Results.Count + " checks FAILED") -ForegroundColor Red
+}
+Write-Host ""
+Write-Host "Neural Hive workspace:  http://127.0.0.1:9500/" -ForegroundColor Cyan
+Write-Host "Ops dashboard:  http://127.0.0.1:9200/" -ForegroundColor Cyan
+Write-Host "DeepSeek agent:  http://127.0.0.1:9107/health" -ForegroundColor Cyan
+Write-Host "Coordinator API:  http://127.0.0.1:9200/agents  http://127.0.0.1:9200/route?task=..." -ForegroundColor DarkGray
+Write-Host "Logs:  logs/implementation.log logs/hub.log logs/agents.log logs/backend.log logs/frontend.log logs/e2e.log logs/errors.log" -ForegroundColor DarkGray
+Write-Host "Stop services:  Get-Process agent,relayer,coordinator -ErrorAction SilentlyContinue | Stop-Process -Force" -ForegroundColor DarkGray
+Write-Host ""
+if ($NoStart) {
+    foreach ($p in $script:Started) { try { $p.Kill() } catch { } }
+    Write-Host "services stopped (-NoStart)" -ForegroundColor DarkGray
+}
+if ($script:Failed -gt 0) { exit 1 }
+exit 0
