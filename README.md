@@ -7,11 +7,11 @@ This repository is the working prototype of that design: Solidity contracts, the
 ## Images
 
 <p align="center">
-  <img src="./assets/image_1_hub.png" width="30%">
   <img src="./assets/image_2_hub.png" width="30%">
   <img src="./assets/hive_agent_1.png" width="30%">
-  <br>
   <img src="./assets/hive_agent2.png" width="30%">
+    <br>
+
   <img src="./assets/hive_agent_3.png" width="30%">
   <img src="./assets/hive_5.png" width="30%">
 
