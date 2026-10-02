@@ -41,6 +41,8 @@ type Selection struct {
 	Score        float64  `json:"score"`
 	Online       bool     `json:"online"`
 	Reason       string   `json:"reason"`
+	PriceHive    float64  `json:"priceHive"`
+	CostHive     string   `json:"costHive"`
 }
 
 // AgentResult is the outcome of one agent executing one subtask, plus the provenance the UI shows.
@@ -64,6 +66,9 @@ type AgentResult struct {
 	Status           string   `json:"status"`
 	Error            string   `json:"error,omitempty"`
 	Hash             string   `json:"hash"`
+	AgentName        string   `json:"agentName"`
+	Byzantine        bool     `json:"byzantine"`
+	PriceHive        float64  `json:"priceHive"`
 }
 
 // TraceEvent is one step of the execution trace.
@@ -123,28 +128,46 @@ type Payment struct {
 
 // Result is the complete Hub output for one task.
 type Result struct {
-	TaskID       string        `json:"taskId"`
-	Task         string        `json:"task"`
-	Complexity   Complexity    `json:"complexity"`
-	HIVE         int           `json:"hive"`
-	Subtasks     []Subtask     `json:"subtasks"`
-	Selections   []Selection   `json:"selections"`
-	AgentResults []AgentResult `json:"agentResults"`
-	Answer       string        `json:"answer"`
-	AnswerHash   string        `json:"answerHash"`
-	Aggregation  Aggregation   `json:"aggregation"`
-	Anchor       Anchor        `json:"anchor"`
-	Payment      *Payment      `json:"payment,omitempty"`
-	Trace        []TraceEvent  `json:"trace"`
-	StartedAt    string        `json:"startedAt"`
-	FinishedAt   string        `json:"finishedAt"`
-	ElapsedMs    int64         `json:"elapsedMs"`
-	AgentsUsed   []string      `json:"agentsUsed"`
-	Errors       []string      `json:"errors"`
+	TaskID          string           `json:"taskId"`
+	Task            string           `json:"task"`
+	Complexity      Complexity       `json:"complexity"`
+	HIVE            int              `json:"hive"`
+	Subtasks        []Subtask        `json:"subtasks"`
+	Selections      []Selection      `json:"selections"`
+	AgentResults    []AgentResult    `json:"agentResults"`
+	Answer          string           `json:"answer"`
+	AnswerHash      string           `json:"answerHash"`
+	Aggregation     Aggregation      `json:"aggregation"`
+	Anchor          Anchor           `json:"anchor"`
+	Payment         *Payment         `json:"payment,omitempty"`
+	Settlement      *Settlement      `json:"settlement,omitempty"`
+	Trace           []TraceEvent     `json:"trace"`
+	StartedAt       string           `json:"startedAt"`
+	FinishedAt      string           `json:"finishedAt"`
+	ElapsedMs       int64            `json:"elapsedMs"`
+	AgentsUsed      []string         `json:"agentsUsed"`
+	Errors          []string         `json:"errors"`
+	Algorithms      AlgorithmSummary `json:"algorithms"`
+	Cost            CostEstimate     `json:"cost"`
+	ByzantineAgents []string         `json:"byzantineAgents"`
 }
 
 // AgentCard is the registry view of one agent instance.
 type AgentCard struct {
+	// Name is the human-readable display name of the agent.
+	Name string `json:"name"`
+	// PriceHive is the agent advertised price in HIVE for one query.
+	PriceHive float64 `json:"priceHive"`
+	// Owner is the on-chain owner (operator) address of the agent.
+	Owner string `json:"owner,omitempty"`
+	// ContractID is the unique on-chain identity of the agent, taken from the AgentWallet smart
+	// contract deployed for this agent (AgentWalletFactory.walletOf(keccak256(agentId))). Every agent
+	// is therefore uniquely identified by its own smart contract address on chain.
+	ContractID string `json:"contractId,omitempty"`
+	// BalanceHive is the HIVE balance held by the agent on-chain wallet contract.
+	BalanceHive string `json:"balanceHive,omitempty"`
+	// BalanceWei is BalanceHive in the token base unit.
+	BalanceWei     string   `json:"balanceWei,omitempty"`
 	ID             string   `json:"id"`
 	Index          int      `json:"index"`
 	Port           int      `json:"port"`
@@ -163,4 +186,24 @@ type AgentCard struct {
 	AvgLatencyMs   int64    `json:"avgLatencyMs"`
 	LastSeen       string   `json:"lastSeen"`
 	LastError      string   `json:"lastError"`
+}
+
+// CostEstimate is the expected HIVE cost of a request, computed from each agent configured
+// price before execution (proposal section 7 pricing). It is the total cost the requester pays.
+type CostEstimate struct {
+	Subtasks     int            `json:"subtasks"`
+	TotalHive    string         `json:"totalHive"`
+	PerAgentHive string         `json:"perAgentHive"`
+	BaselineHive string         `json:"baselineHive"`
+	SavedHive    string         `json:"savedHive"`
+	Optimized    bool           `json:"optimized"`
+	Breakdown    []SubtasksCost `json:"breakdown"`
+}
+
+// SubtasksCost is the priced line item for one subtask.
+type SubtasksCost struct {
+	SubtaskID string   `json:"subtaskId"`
+	Tags      []string `json:"tags"`
+	AgentID   string   `json:"agentId"`
+	PriceHive float64  `json:"priceHive"`
 }

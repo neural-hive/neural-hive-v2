@@ -79,6 +79,7 @@ type Contracts struct {
 	TaskCoordinator         string
 	HiveSnowball            string
 	MockTeleporterMessenger string
+	AgentWalletFactory      string
 }
 
 // FindRoot walks upward from the working directory looking for the project root.
@@ -169,6 +170,7 @@ func ApplyDeploymentOverrides(root string, c *Contracts) {
 	set(&c.TaskCoordinator, "TaskCoordinator")
 	set(&c.HiveSnowball, "HiveSnowball")
 	set(&c.MockTeleporterMessenger, "MockTeleporterMessenger")
+	set(&c.AgentWalletFactory, "AgentWalletFactory")
 }
 
 // deploymentAdmin returns the admin (deployer) address recorded by the Truffle migration. The Hub
@@ -215,6 +217,7 @@ func Load() (*Config, error) {
 			TaskCoordinator:         get("TASK_COORDINATOR_ADDRESS", ""),
 			HiveSnowball:            get("HIVE_SNOWBALL_ADDRESS", ""),
 			MockTeleporterMessenger: get("MOCK_TELEPORTER_ADDRESS", ""),
+			AgentWalletFactory:      get("AGENT_WALLET_FACTORY_ADDRESS", ""),
 		},
 		Ollama: Ollama{
 			BaseURL:  get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
@@ -235,6 +238,8 @@ func Load() (*Config, error) {
 	ApplyDeploymentOverrides(root, &cfg.Contracts)
 	cfg.Hub = loadHub()
 	cfg.Hub.TokenAddress = cfg.Contracts.HiveToken
+	cfg.Hub.RegistryAddress = cfg.Contracts.CapabilityRegistry
+	cfg.Hub.WalletFactoryAddress = cfg.Contracts.AgentWalletFactory
 	cfg.Hub.RPCURL = cfg.RPCURL
 	cfg.Hub.Network = cfg.Network
 	if cfg.Hub.Treasury == "" {
@@ -242,6 +247,13 @@ func Load() (*Config, error) {
 	}
 	if cfg.Hub.Treasury == "" {
 		cfg.Hub.Treasury = deploymentAdmin(root)
+	}
+
+	if cfg.Hub.HubPrivateKey == "" {
+		cfg.Hub.HubPrivateKey = cfg.PrivateKey1
+	}
+	if cfg.Hub.HubPrivateKey == "" {
+		cfg.Hub.HubPrivateKey = cfg.PrivateKey2
 	}
 
 	cfg.ChainID = int64(getInt("CHAIN_ID", 1337))
@@ -259,6 +271,18 @@ func get(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func getFloat(key string, def float64) float64 {
+	v := get(key, "")
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 func getInt(key string, def int) int {

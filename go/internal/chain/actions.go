@@ -70,7 +70,23 @@ type Request struct {
 // ---------------- token / admin helpers ----------------
 
 // TransferEth sends native ETH from the client account (used to fund fresh agent keys).
+// TransferEth sends native ETH (gas) to an address, retrying once on a stale nonce so it never
+// fails because another Neural Hive process consumed a nonce first.
 func (c *Client) TransferEth(to common.Address, wei *big.Int) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if lastErr = c.transferEthOnce(to, wei); lastErr == nil || !isNonceError(lastErr) {
+			return lastErr
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return lastErr
+}
+
+func (c *Client) transferEthOnce(to common.Address, wei *big.Int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

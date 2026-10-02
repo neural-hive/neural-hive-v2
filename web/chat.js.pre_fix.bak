@@ -1,0 +1,73 @@
+/* Neural Hive chat page: persistent conversations with full user/assistant history (application store), algorithm simulation, cost estimate, paid multi-agent run via MetaMask. */
+(function(){
+  var N=window.NH; var API=N.API; var walletState=N.wallet; var PAY=null;
+  var running=false;
+  function D(id){ return document.getElementById(id); }
+  function el(tag,cls,text){ var e=document.createElement(tag); if(cls){ e.className=cls; } if(text!=null){ e.textContent=text; } return e; }
+  function notify(msg,bad){ var n=D("notice"); if(!n){ return; } if(!msg){ n.className="nh-notice"; n.textContent=""; return; } n.className="nh-notice show"+(bad?" bad":""); n.textContent=msg; }
+  function algo(){ return { routing:D("routing").value, aggregation:D("aggregation").value, byzantine:parseInt(D("byzantine").value,10)||0, simulate:true }; }
+
+  // buildHistory returns the last HUB_HISTORY_LIMIT turns of the active thread (user/assistant) so the
+  // agents answer with the same conversation context the user sees. The limit is server-configured.
+  // currentHistoryLimit reads the user chosen cap from the composer control (-1 = entire conversation,
+  // 0/absent = use the server default HUB_HISTORY_LIMIT).
+  function currentHistoryLimit(){ var s=D("historyLimit"); if(!s){ return 0; } var v=parseInt(s.value,10); return isNaN(v)?0:v; }
+  // buildHistory returns the exact conversation the agents receive: an ordered array of
+  // {role, content} turns (user/assistant) matching what the user sees, capped to the chosen
+  // number of most recent messages (or the whole conversation when the cap is -1). This is what
+  // lets the agents remember who the user is across turns.
+  function buildHistory(t){ var limit=currentHistoryLimit(); if(limit===0){ limit=(PAY&&PAY.historyLimit)||8; } var msgs=(t&&t.messages)||[]; var turns=[]; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(m.role==="user"&&m.text){ turns.push({role:"user",content:m.text}); } else if(m.role==="assistant"&&m.text&&m.status!=="error"&&m.status!=="running"){ turns.push({role:"assistant",content:m.text}); } } if(limit>0&&turns.length>limit){ turns=turns.slice(turns.length-limit); } return turns; }
+  function resultMeta(r){ var a=r.algorithms||{}; var c=r.cost||{}; var box=el("div","nh-muted"); box.style.marginTop="12px"; box.style.borderTop="1px solid var(--line2)"; box.style.paddingTop="10px";
+    function line(parts){ var d=el("div"); for(var i=0;i<parts.length;i++){ d.appendChild(parts[i]); } box.appendChild(d); return d; }
+    function b(t){ return el("b",null,t); } function tx(s){ return document.createTextNode(s); }
+    line([b("Complexity "),tx((r.complexity||{}).level||"-"),tx("  -  Agents "),tx((r.agentsUsed||[]).join(", "))]);
+    line([b("Routing "),tx(a.routeModeUsed||a.routing||"selfish"),tx("  -  Aggregation "),tx(a.aggregation||"-"),tx("  -  Cost "),tx(c.totalHive||"-"),tx(" HIVE")]);
+    if(r.answerHash){ line([b("Answer hash "),tx(r.answerHash)]); }
+    if(r.anchor){ line([b("On-chain anchor "),tx(r.anchor.ok?"yes":"no"),tx(" "),tx(r.anchor.requestTx||"")]); }
+    if(r.payment){ line([b("Payment "),tx((r.payment.paidHive||"0")+" HIVE "),tx(r.payment.mode||""),tx(" "),tx(r.payment.txHash||"")]); }
+    if(r.taskId){ var a2=el("a","btn","Open Execution Details"); a2.href="/execution.html?id="+encodeURIComponent(r.taskId); a2.target="_blank"; a2.style.marginTop="8px"; box.appendChild(a2); }
+    return box; }
+  function doEstimate(){ var q=D("input").value.trim(); if(!q){ return; } var th=N.threads.active(); N.post("/estimate", Object.assign({task:q, history:buildHistory(th), historyLimit:currentHistoryLimit()}, algo())).then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } var c=d.cost||{}; notify("Estimated cost: "+c.totalHive+" HIVE for "+(c.subtasks||0)+" subtask(s)",false); }).catch(function(e){ notify(N.errText(e),true); }); }
+  function topUp(q,setPhase){ if(!PAY||!PAY.faucet){ return Promise.resolve(); } var need=BigInt(q.costWei); var low=(walletState.hiveWei==null)||(walletState.hiveWei<need); if(!low){ return Promise.resolve(); } setPhase("Wallet short of HIVE - requesting test funds from the devnet faucet"); return N.faucet(walletState.account).then(function(d){ if(!d.__ok||d.ok===false){ throw new Error("Faucet failed: "+(d.error||d.__status)); } return N.refreshBalance(); }); }
+
+  function msgNode(m){ var wrap=el("div","nh-msg"); wrap.setAttribute("data-id",m.id); if(m.role==="user"){ wrap.appendChild(el("div","bubble-user",m.text)); } else { var ans=el("div","answer"); if(m.status==="running"){ var sp=el("span","nh-spin"); ans.appendChild(sp); ans.appendChild(document.createTextNode(" "+(m.phase||"Working..."))); } else { var prose=el("div","nh-prose"); prose.innerHTML=N.md(m.text||""); ans.appendChild(prose); if(m.meta){ ans.appendChild(m.meta); } } wrap.appendChild(ans); } return wrap; }
+  function renderThread(){ var th=D("thread"); if(!th){ return; } var t=N.threads.active(); th.textContent=""; if(!t||!t.messages.length){ var em=el("div","empty"); em.appendChild(el("div","big","Ask the Hive")); em.appendChild(el("div",null,"A request is routed to independent DeepSeek agents and aggregated into one verified answer, paid in HIVE from your wallet.")); th.appendChild(em); return; } for(var i=0;i<t.messages.length;i++){ th.appendChild(msgNode(t.messages[i])); } window.scrollTo(0,document.body.scrollHeight); }
+  function renderThreads(){ var box=D("threadList"); if(!box){ return; } var list=N.threads.list(); var act=N.store.getState().activeThreadId; box.textContent=""; for(var i=0;i<list.length;i++){ var t=list[i]; var row=el("div","nh-thread"+(t.id===act?" active":"")); row.setAttribute("data-id",t.id); row.appendChild(el("span","t",t.title)); var x=el("span","x","x"); x.setAttribute("data-del",t.id); row.appendChild(x); box.appendChild(row); } }
+
+  function submit(){ if(running){ return; } var inp=D("input"); var q=inp.value.trim(); if(!q){ return; } notify(""); running=true; D("send").disabled=true; inp.value=""; inp.style.height="auto";
+    var t=N.threads.active(); var history=buildHistory(t); var historyLimit=currentHistoryLimit(); N.threads.addMessage(t.id,{role:"user",text:q}); var asst=N.threads.addMessage(t.id,{role:"assistant",status:"running",phase:"Connecting MetaMask..."}); renderThreads(); renderThread();
+    function setPhase(phase){ N.threads.updateMessage(t.id,asst.id,{phase:phase,status:"running"}); renderThread(); }
+    setPhase("Connecting MetaMask..."); var quote=null;
+    N.connect().then(function(){ walletRender(); setPhase("Pricing the request..."); return N.post("/quote", Object.assign({task:q, history:history, historyLimit:historyLimit}, algo())); })
+      .then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } quote=d; return topUp(d,setPhase); })
+      .then(function(){ setPhase("Confirm the "+quote.costHive+" HIVE payment in MetaMask"); return N.transferHive(quote.treasury, quote.costWei); })
+      .then(function(tx){ setPhase("Payment confirmed - verifying on chain, routing agents (this can take a moment)"); return N.post("/task", Object.assign({task:q, quoteId:quote.quoteId, hive:quote.hive, txHash:tx, history:history, historyLimit:historyLimit}, algo())); })
+      .then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } N.threads.updateMessage(t.id,asst.id,{status:"done",text:d.answer||"",meta:resultMeta(d)}); renderThread(); })
+      .catch(function(e){ N.threads.updateMessage(t.id,asst.id,{status:"error",text:N.errText(e)}); renderThread(); notify(N.errText(e),true); })
+      .then(function(){ running=false; D("send").disabled=false; N.refreshBalance().then(walletRender).catch(function(){}); });
+  }
+  var walletMount=null; function walletRender(){ if(walletMount){ walletMount.render(); } }
+
+  function faucet(){ notify(""); N.connect().then(function(){ walletRender(); return N.faucet(walletState.account); }).then(function(d){ if(!d.__ok||d.ok===false){ throw new Error("Faucet failed: "+(d.error||d.__status)); } return N.refreshBalance(); }).then(function(){ walletRender(); notify("Faucet topped your wallet up with test HIVE (devnet).",false); }).catch(function(e){ notify(N.errText(e),true); }); }
+  function loadAgents(){ N.get("/agents").then(function(d){ var list=(d.agents||[]); var box=D("agentList"); if(!box){ return; } box.textContent=""; var n=Math.min(list.length,6); for(var i=0;i<n;i++){ var a=list[i]; var row=el("div","agent-mini"); row.appendChild(el("span","dot "+(a.status==="online"?"ok":"bad"))); row.appendChild(el("span","n",(a.name||a.id))); if(a.contractId){ var sub=el("span","sub","contract "+String(a.contractId).slice(0,8)+"..."); row.appendChild(sub); } row.appendChild(el("span","nh-bal",((a.balanceHive!=null?a.balanceHive:"0")+" HIVE"))); box.appendChild(row); } if(list.length>n){ box.appendChild(el("div","nh-muted",(list.length-n)+" more agents")); } }).catch(function(){}); }
+  function loadNetwork(){ N.get("/network").then(function(d){ var e=D("net"); if(e){ e.textContent="agents "+d.online+"/"+d.agents+" online - tasks "+d.completedTasks+" - "+(d.payment?d.payment.pricePerAgent:"-")+" HIVE/agent"; } }).catch(function(){}); }
+  function loadPay(){ return N.loadPay().then(function(c){ PAY=c; var ch=D("costHint"); if(ch){ ch.innerHTML=""; ch.appendChild(el("b",null,c.pricePerAgent)); ch.appendChild(document.createTextNode(" HIVE per agent - a simple request uses 1 agent, a complex one more.")); } return c; }); }
+
+  function bindSidebar(){ var nb=D("newChat"); if(nb){ nb.onclick=function(){ N.threads.new("New chat"); renderThreads(); renderThread(); D("input").focus(); }; } var tl=D("threadList"); if(tl){ tl.addEventListener("click", function(ev){ var del=ev.target.getAttribute("data-del"); if(del){ ev.stopPropagation(); N.threads.delete(del); renderThreads(); renderThread(); return; } var node=ev.target.closest(".nh-thread"); if(node){ N.threads.setActive(node.getAttribute("data-id")); renderThreads(); renderThread(); } }); } }
+  function init(){
+    D("send").onclick=submit; D("estimateBtn").onclick=doEstimate; var fb=D("faucetBtn"); if(fb){ fb.onclick=faucet; }
+    walletMount=N.mountWallet("walletBtn");
+    bindSidebar();
+    var prefs=N.store.getState().prefs||{}; if(D("routing")&&prefs.routing){ D("routing").value=prefs.routing; } if(D("aggregation")&&prefs.aggregation){ D("aggregation").value=prefs.aggregation; } if(D("byzantine")&&prefs.byzantine!=null){ D("byzantine").value=prefs.byzantine; } if(D("historyLimit")&&prefs.historyLimit!=null){ D("historyLimit").value=String(prefs.historyLimit); }
+    function savePrefs(){ N.store.setPrefs({ routing:D("routing").value, aggregation:D("aggregation").value, byzantine:parseInt(D("byzantine").value,10)||0, historyLimit:currentHistoryLimit() }); }
+    D("routing").onchange=savePrefs; D("aggregation").onchange=savePrefs; D("byzantine").onchange=savePrefs; if(D("historyLimit")){ D("historyLimit").onchange=savePrefs; }
+    var inp=D("input"); inp.addEventListener("input",function(){ inp.style.height="auto"; inp.style.height=Math.min(inp.scrollHeight,170)+"px"; });
+    inp.addEventListener("keydown",function(e){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); submit(); } });
+    N.store.subscribe(function(){ renderThreads(); });
+    loadPay().catch(function(){}); loadAgents(); loadNetwork(); renderThreads(); renderThread();
+    setInterval(loadAgents,12000); setInterval(loadNetwork,12000);
+    notify("Welcome to Neural Hive. Connect MetaMask, add agents, and run a verified multi-agent request.",false);
+  }
+  if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
+})();
+

@@ -110,7 +110,7 @@ func TestExecuteAgentTimeoutIsRecorded(t *testing.T) {
 	reg.Register(AgentCard{ID: "agent-slow", Port: 9499, Endpoint: slow.URL, Tags: []string{"research"}, Status: "online"})
 	h := NewWithProvider(config.Hub{HIVE: config.HIVEPolicy{Default: 1, Complex: 2, Max: 10}}, reg, fakeProvider{}, 60*time.Millisecond)
 	card, _ := reg.Get("agent-slow")
-	res := h.executeAgent(context.Background(), "task-x", Subtask{ID: "st-1", Tags: []string{"research"}}, card)
+	res := h.executeAgent(context.Background(), "task-x", Subtask{ID: "st-1", Tags: []string{"research"}}, card, nil)
 	if res.Status != "failed" {
 		t.Fatalf("status %s, want failed", res.Status)
 	}

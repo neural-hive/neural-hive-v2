@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"bytes"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -37,6 +39,9 @@ import (
 const hiveSymbol = "HIVE"
 
 var transferTopic = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+
+// updatePriceSelector is the 4-byte selector of CapabilityRegistry.updatePrice(uint256).
+var updatePriceSelector = crypto.Keccak256([]byte("updatePrice(uint256)"))[:4]
 
 // Quote is a price offer for one specific task text.
 type Quote struct {
@@ -117,16 +122,26 @@ func (h *Hub) Cost(agents int) *big.Int {
 	return new(big.Int).Mul(price, big.NewInt(int64(agents)))
 }
 
-// Quote classifies the task, decides how many agents it needs and prices it.
-func (h *Hub) Quote(text string, hiveOverride int) *Quote {
+// Quote classifies the task, decides how many agents it needs and prices it from the actual agents
+// that will serve the request: the cost is the sum of the selected agents’ advertised prices (the
+// same selection EstimateCost uses, so the quoted cost equals the estimated cost and the amount the
+// requester is charged), not a flat per-agent constant.
+func (h *Hub) Quote(text string, hiveOverride int, alg AlgConfig) *Quote {
 	text = strings.TrimSpace(text)
 	cx := Classify(text)
 	hive := h.decideHIVE(cx, SplitObjectives(text), hiveOverride)
+	cost, _, sels, _ := h.EstimateCost(text, hiveOverride, alg)
+	costWei := parseHiveToWei(cost.TotalHive)
+	if len(sels) == 0 {
+		// No agent could be priced (none online yet): fall back to the configured per-agent price so
+		// a task is never quoted at zero just because selection was momentarily empty.
+		costWei = h.Cost(hive)
+	}
 	ttl := h.Cfg.QuoteTTL
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	q := &Quote{ID: newQuoteID(), Task: text, HIVE: hive, Complexity: cx.Level, CostWei: h.Cost(hive), ExpiresAt: time.Now().Add(ttl)}
+	q := &Quote{ID: newQuoteID(), Task: text, HIVE: hive, Complexity: cx.Level, CostWei: costWei, ExpiresAt: time.Now().Add(ttl)}
 	h.Pay.mu.Lock()
 	for id, old := range h.Pay.quotes {
 		if time.Now().After(old.ExpiresAt) || old.Used {
@@ -136,6 +151,18 @@ func (h *Hub) Quote(text string, hiveOverride int) *Quote {
 	h.Pay.quotes[q.ID] = q
 	h.Pay.mu.Unlock()
 	return q
+}
+
+// parseHiveToWei converts a decimal HIVE string (as produced by formatHiveFloat) to 18-decimal base
+// units, so a cost computed from agent prices can be charged exactly on chain.
+func parseHiveToWei(s string) *big.Int {
+	r, ok := new(big.Rat).SetString(strings.TrimSpace(s))
+	if !ok || r.Sign() < 0 {
+		return big.NewInt(0)
+	}
+	unit := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	r.Mul(r, new(big.Rat).SetInt(unit))
+	return new(big.Int).Quo(r.Num(), r.Denom())
 }
 
 // FormatHive renders a base-unit amount as a decimal HIVE string without trailing zeros.
@@ -257,6 +284,70 @@ func (h *Hub) Settle(ctx context.Context, quoteID, txHash, task string) (*Paymen
 	pay.PaidHive = FormatHive(paid)
 	pay.QuoteID = q.ID
 	return pay, q.HIVE, nil
+}
+
+// VerifyRegistrationFee checks an on-chain HIVE transfer of at least fee to the treasury and
+// returns the payer. It is used by the agent-registration flow so a wallet that wants to list an
+// agent must really spend HIVE.
+func (h *Hub) VerifyRegistrationFee(ctx context.Context, txHash string, fee *big.Int) (common.Address, *big.Int, uint64, error) {
+	if len(txHash) != 66 || !strings.HasPrefix(txHash, "0x") {
+		return common.Address{}, nil, 0, payErr(400, "txHash must be a 32-byte 0x-prefixed transaction hash")
+	}
+	if _, err := hex.DecodeString(txHash[2:]); err != nil {
+		return common.Address{}, nil, 0, payErr(400, "txHash is not valid hex")
+	}
+	return h.Pay.verify(ctx, txHash, common.HexToAddress(h.Cfg.Treasury), common.HexToAddress(h.Cfg.TokenAddress), fee)
+}
+
+// VerifyPriceUpdate checks that txHash is a real CapabilityRegistry.updatePrice(price) transaction
+// mined from the given owner address. It is how the Hub enforces that only the on-chain owner of an
+// agent can change its price: the owner must really send updatePrice from their own wallet.
+func (h *Hub) VerifyPriceUpdate(ctx context.Context, txHash, from string, priceWei *big.Int) error {
+	txHash = strings.ToLower(strings.TrimSpace(txHash))
+	if len(txHash) != 66 || !strings.HasPrefix(txHash, "0x") {
+		return payErr(400, "txHash must be a 32-byte 0x-prefixed transaction hash")
+	}
+	if strings.TrimSpace(h.Cfg.RegistryAddress) == "" {
+		return payErr(503, "no CapabilityRegistry address configured")
+	}
+	p := h.Pay
+	eth, err := p.client()
+	if err != nil {
+		return payErr(503, "cannot reach the chain RPC: %v", err)
+	}
+	hash := common.HexToHash(txHash)
+	ctx2, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	tx, _, err := eth.TransactionByHash(ctx2, hash)
+	if err != nil {
+		return payErr(402, "updatePrice transaction %s was not found on chain yet: %v", txHash, err)
+	}
+	rc, err := eth.TransactionReceipt(ctx2, hash)
+	if err != nil {
+		return payErr(402, "could not read the updatePrice receipt: %v", err)
+	}
+	if rc.Status != 1 {
+		return payErr(402, "the updatePrice transaction failed on chain")
+	}
+	registry := common.HexToAddress(h.Cfg.RegistryAddress)
+	if tx.To() == nil || *tx.To() != registry {
+		return payErr(402, "the transaction did not call the CapabilityRegistry")
+	}
+	sender, serr := types.Sender(types.LatestSignerForChainID(big.NewInt(h.Cfg.ChainID)), tx)
+	if serr != nil || !strings.EqualFold(sender.Hex(), strings.TrimSpace(from)) {
+		return payErr(403, "the transaction was not sent by the wallet %s", from)
+	}
+	data := tx.Data()
+	if len(data) < 4 || !bytes.Equal(data[:4], updatePriceSelector) {
+		return payErr(400, "the transaction is not a CapabilityRegistry.updatePrice call")
+	}
+	if priceWei != nil && len(data) >= 36 {
+		got := new(big.Int).SetBytes(data[4:36])
+		if got.Cmp(priceWei) != 0 {
+			return payErr(400, "the transaction price %s does not match the requested price %s", got.String(), priceWei.String())
+		}
+	}
+	return nil
 }
 
 // verify reads the receipt and requires a HiveToken Transfer of at least cost to the treasury.

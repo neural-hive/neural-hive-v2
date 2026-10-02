@@ -18,7 +18,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -283,12 +282,10 @@ func main() {
 		})
 	})
 
-	webDir := filepath.Join(cfg.Root, "web")
-	if st, err := os.Stat(webDir); err == nil && st.IsDir() {
-		mux.Handle("/", http.FileServer(http.Dir(webDir)))
-	}
+	// The coordination layer is a headless API only. The agentic workspace UI is served by the
+	// Hub on :9500; this port intentionally serves no HTML UI.
 
-	log.Printf("coordinator listening on port %d admin=%s web=%s", *port, admin.From.Hex(), webDir)
+	log.Printf("coordinator listening on port %d admin=%s web=%s", *port, admin.From.Hex(), "ui-on-9500")
 	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), mux); err != nil {
 		log.Fatalf("listen: %v", err)
 	}

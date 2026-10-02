@@ -12,12 +12,16 @@ import (
 // Reputation and risk are updated from the real observed outcome of every execution.
 //
 // Reputation (r) rewards success and decays on failure, moving asymptotically toward 1 or 0:
-//   success: r <- r + AlphaReputation*(1-r)
-//   failure: r <- r - AlphaReputation*r
-// Risk (k) is the Hub''s estimate that the next call to an agent fails, an exponential moving
+//
+//	success: r <- r + AlphaReputation*(1-r)
+//	failure: r <- r - AlphaReputation*r
+//
+// Risk (k) is the Hub”s estimate that the next call to an agent fails, an exponential moving
 // average of the failure signal:
-//   success: k <- k - BetaRisk*k
-//   failure: k <- k + BetaRisk*(1-k)
+//
+//	success: k <- k - BetaRisk*k
+//	failure: k <- k + BetaRisk*(1-k)
+//
 // Both live in [0,1] and start neutral; a brand new agent has no invented history.
 const (
 	AlphaReputation   = 0.15
@@ -46,6 +50,7 @@ type persistedCard struct {
 	AvgLatencyMs   int64   `json:"avgLatencyMs"`
 	LastSeen       string  `json:"lastSeen"`
 	LastError      string  `json:"lastError"`
+	PriceHive      float64 `json:"priceHive"`
 }
 
 type persisted struct {
@@ -78,6 +83,9 @@ func (r *Registry) Register(card AgentCard) {
 		existing.Endpoint = card.Endpoint
 		existing.Tags = append([]string{}, card.Tags...)
 		existing.Model = card.Model
+		if card.PriceHive > 0 {
+			existing.PriceHive = card.PriceHive
+		}
 		if card.Provider != "" {
 			existing.Provider = card.Provider
 		}
@@ -202,6 +210,7 @@ func (r *Registry) Save() error {
 			ID: c.ID, Reputation: c.Reputation, Risk: c.Risk, Success: c.Success, Failure: c.Failure,
 			Timeouts: c.Timeouts, Executions: c.Executions, TotalLatencyMs: c.TotalLatencyMs,
 			AvgLatencyMs: c.AvgLatencyMs, LastSeen: c.LastSeen, LastError: c.LastError,
+			PriceHive: c.PriceHive,
 		})
 	}
 	r.mu.RUnlock()
@@ -244,7 +253,101 @@ func (r *Registry) Load() error {
 			c.AvgLatencyMs = pc.AvgLatencyMs
 			c.LastSeen = pc.LastSeen
 			c.LastError = pc.LastError
+			if pc.PriceHive > 0 {
+				c.PriceHive = pc.PriceHive
+			}
 		}
 	}
 	return nil
+}
+
+// EnsureDynamic registers an externally supplied agent (the Add Agent flow) if it is not already
+// known. It returns true when a new card was created. Reputation and risk start neutral.
+func (r *Registry) EnsureDynamic(card AgentCard) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.cards[card.ID]; ok {
+		return false
+	}
+	c := card
+	if c.Reputation == 0 {
+		c.Reputation = InitialReputation
+	}
+	if c.Risk == 0 {
+		c.Risk = InitialRisk
+	}
+	if c.Status == "" {
+		c.Status = "unknown"
+	}
+	r.order = append(r.order, c.ID)
+	r.cards[c.ID] = &c
+	return true
+}
+
+// SetContractIdentity records the unique on-chain identity (the AgentWallet smart contract) of an
+// agent, so the UI can show the contract address that identifies it on chain.
+func (r *Registry) SetContractIdentity(id, contract string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.cards[id]
+	if !ok {
+		return false
+	}
+	c.ContractID = contract
+	return true
+}
+
+// SetBalance records the agent on-chain wallet balance in HIVE (both the human string and the base unit).
+func (r *Registry) SetBalance(id, hive, wei string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.cards[id]
+	if !ok {
+		return false
+	}
+	c.BalanceHive = hive
+	c.BalanceWei = wei
+	return true
+}
+
+// SetOwner records the on-chain owner (operator) address of an agent.
+func (r *Registry) SetOwner(id, owner string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.cards[id]
+	if !ok {
+		return false
+	}
+	c.Owner = owner
+	return true
+}
+
+// SetPrice updates an agent advertised price in HIVE (0 clears it).
+func (r *Registry) SetPrice(id string, price float64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.cards[id]
+	if !ok {
+		return false
+	}
+	c.PriceHive = price
+	return true
+}
+
+// Remove deletes an agent from the registry (used by the optional deregister flow).
+func (r *Registry) Remove(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.cards[id]; !ok {
+		return false
+	}
+	delete(r.cards, id)
+	out := r.order[:0]
+	for _, x := range r.order {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	r.order = out
+	return true
 }

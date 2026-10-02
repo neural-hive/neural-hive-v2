@@ -1,0 +1,66 @@
+/* Neural Hive chat page: live activity, algorithm simulation, cost estimate, paid multi-agent run. */
+(function(){
+  var N=window.NH; var API=N.API; var walletState=N.wallet; var PAY=null;
+  var currentEvents=[]; var lastSeq=0; var activeTask=null; var running=false;
+  var SUGGESTIONS=["What is distributed consensus?","Analyze the architecture of a decentralized AI agent network, identify security risks, and propose an implementation strategy.","Compare optimistic verification and replicated Krum for a multi-agent network."];
+  function D(id){ return document.getElementById(id); }
+  function notify(msg,bad){ var n=D("notice"); if(!msg){ n.className="nh-notice"; n.textContent=""; return; } n.className="nh-notice show"+(bad?" bad":""); n.textContent=msg; }
+  function algo(){ return { routing:D("routing").value, aggregation:D("aggregation").value, byzantine:parseInt(D("byzantine").value,10)||0, simulate:true }; }
+  function evRow(e){ var cls="nh-ev-row"; if(e.kind==="response-byzantine"||e.kind==="response-failed"||e.kind==="anchor-failed"){ cls+=" byz"; } else if(e.kind==="final"||e.kind==="aggregated"||e.kind==="anchor"){ cls+=" done"; }
+    return "<div class='"+cls+"'><div class='nh-ev-ico'>></div><div><div class='nh-ev-lab'>"+N.esc(e.label)+"</div><div class='nh-ev-det'>"+N.esc(e.detail||"")+"</div></div><div class='nh-ev-t'>"+N.esc(String(e.at||"").slice(11,19))+"</div></div>; "; }
+  function renderEvents(){ var box=D("live"); if(!currentEvents.length){ box.innerHTML="<div class='nh-muted'>Waiting for a request...</div>"; return; } var h=""; for(var i=0;i<currentEvents.length;i++){ h+=evRow(currentEvents[i]); } box.innerHTML=h; box.scrollTop=box.scrollHeight; }
+  function connectStream(){ if(!window.EventSource){ return null; } var es=new EventSource(API+"/events?since="+lastSeq); es.onmessage=function(m){ try{ var e=JSON.parse(m.data); if(e.seq){ lastSeq=e.seq; } currentEvents.push(e); if(e.taskId){ activeTask=e.taskId; } renderEvents(); }catch(x){} }; return es; }
+  function resultMeta(r){
+    var a=r.algorithms||{}; var c=r.cost||{};
+    var h="<div class='nh-muted' style='margin-top:12px;border-top:1px solid var(--line2);padding-top:10px'>";
+    h+="<b>Complexity</b> "+N.esc((r.complexity||{}).level||"-")+" &middot; <b>Agents</b> "+N.esc((r.agentsUsed||[]).join(", "))+"<br>";
+    h+="<b>Routing</b> "+N.esc(a.routeModeUsed||a.routing||"selfish")+" &middot; <b>Aggregation</b> "+N.esc(a.aggregation||"-")+" &middot; <b>Committee</b> "+N.esc(a.committee)+" &middot; <b>Byzantine</b> "+N.esc(a.byzantine)+" (f-max "+N.esc(a.faultTolerance)+")<br>";
+    h+="<b>Cost</b> "+N.esc(c.totalHive||"-")+" HIVE<br>";
+    if(r.answerHash){ h+="<b>Answer hash</b> "+N.esc(r.answerHash)+"<br>"; }
+    if(r.anchor){ h+="<b>On-chain anchor</b> "+(r.anchor.ok?"yes":"no")+" "+N.esc(r.anchor.requestTx||"")+"<br>"; }
+    if(r.payment){ h+="<b>Payment</b> "+N.esc(r.payment.paidHive||"0")+" HIVE "+N.esc(r.payment.mode||"")+" "+N.esc(r.payment.txHash||"")+"<br>"; }
+    if(a.krumOutliers){ h+="<b>Krum outliers filtered</b> "+N.esc(a.krumOutliers)+"<br>"; }
+if(r.taskId){ h+="<a href='/execution.html?id='"+encodeURIComponent(r.taskId)+"' target='_blank' class='btn' style='margin-top:8px'>Open Execution Details</a>"; }
+    return h+"</div>";
+  }
+  function doEstimate(){ var q=D("input").value.trim(); if(!q){ return; } N.post("/estimate", Object.assign({task:q}, algo())).then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } var c=d.cost||{}; notify("Estimated cost: "+c.totalHive+" HIVE for "+(c.subtasks||0)+" subtask(s) "+(c.optimized?"(cost-optimised vs "+c.baselineHive+" baseline)":""),false); }).catch(function(e){ notify(N.errText(e),true); }); }
+  function topUp(q,setPhase){ if(!PAY||!PAY.faucet){ return Promise.resolve(); } var need=BigInt(q.costWei); var low=(walletState.hiveWei==null)||(walletState.hiveWei<need); if(!low){ return Promise.resolve(); } setPhase("Wallet short of HIVE - requesting test funds from the devnet faucet"); return N.faucet(walletState.account).then(function(d){ if(!d.__ok||d.ok===false){ throw new Error("Faucet failed: "+(d.error||d.__status)); } return N.refreshBalance(); }); }
+  function paint(ph,q,inner){ ph.innerHTML="<div class='bubble-user'>"+N.esc(q)+"</div><div class='answer' style='margin-top:10px'>"+inner+"</div>"; }
+  function submit(){ if(running){ return; } var q=D("input").value.trim(); if(!q){ return; } notify(""); running=true; D("send").disabled=true;
+    var th=D("thread"); var ph=document.createElement("div"); ph.className="nh-msg"; th.appendChild(ph);
+    function setPhase(t){ paint(ph,q,"<span class='nh-spin'></span> "+N.esc(t)); window.scrollTo(0,document.body.scrollHeight); }
+    setPhase("Connecting MetaMask..."); var quote=null;
+    N.connect().then(function(){ renderWallet(); setPhase("Pricing the request..."); return N.post("/quote", Object.assign({task:q}, algo())); })
+      .then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } quote=d; return topUp(d,setPhase); })
+      .then(function(){ setPhase("Confirm the "+quote.costHive+" HIVE payment in MetaMask"); return N.transferHive(quote.treasury, quote.costWei); })
+      .then(function(tx){ setPhase("Payment confirmed - verifying on chain, then routing agents"); return N.post("/task", Object.assign({task:q, quoteId:quote.quoteId, hive:quote.hive, txHash:tx}, algo())); })
+      .then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } paint(ph,q,"<div class='nh-prose'>"+N.md(d.answer||"")+"</div>"+resultMeta(d)); })
+      .catch(function(e){ paint(ph,q,"<span style='color:#f87171'>"+N.esc(N.errText(e))+"</span>"); })
+      .then(function(){ running=false; D("send").disabled=false; N.refreshBalance().then(renderWallet).catch(function(){}); });
+  }
+  function renderWallet(){ var b=D("walletBtn"); if(!walletState.account){ b.textContent="Connect MetaMask"; return; } b.innerHTML=N.esc(N.shortAddr(walletState.account))+" <span class='bal'>"+(walletState.hiveWei==null?"...":N.esc(N.hiveStr(walletState.hiveWei)))+" HIVE</span>"; }
+  function connectWallet(){ notify(""); N.connect().then(function(){ renderWallet(); notify("Wallet connected: "+walletState.account,false); }).catch(function(e){ notify(N.errText(e),true); }); }
+  function faucet(){ notify(""); N.connect().then(function(){ renderWallet(); return N.faucet(walletState.account); }).then(function(d){ if(!d.__ok||d.ok===false){ throw new Error("Faucet failed: "+(d.error||d.__status)); } return N.refreshBalance(); }).then(function(){ renderWallet(); notify("Faucet topped your wallet up with test HIVE (devnet).",false); }).catch(function(e){ notify(N.errText(e),true); }); }
+  function loadAgents(){ N.get("/agents").then(function(d){ var list=(d.agents||[]); var box=D("agentList"); box.innerHTML=""; var n=Math.min(list.length,6); for(var i=0;i<n;i++){ var a=list[i];
+    var row=document.createElement("div"); row.className="agent-mini";
+    var dot=document.createElement("span"); dot.className="dot "+(a.status==="online"?"ok":"bad"); row.appendChild(dot);
+    var nm=document.createElement("span"); nm.className="n"; nm.textContent=(a.name||a.id); row.appendChild(nm);
+    var pr=document.createElement("span"); pr.className="nh-muted"; pr.textContent=(a.priceHive!=null?(a.priceHive+" HIVE"):""); row.appendChild(pr);
+    box.appendChild(row);
+  }
+  if(list.length>n){ var more=document.createElement("div"); more.className="nh-muted"; more.style.padding="6px"; more.textContent=(list.length-n)+" more agents - "; var link=document.createElement("a"); link.href="/agents.html"; link.target="_blank"; link.textContent="see all"; more.appendChild(link); box.appendChild(more); }
+  }).catch(function(){}); }
+
+  function loadNetwork(){ N.get("/network").then(function(d){ D("net").textContent="agents "+d.online+"/"+d.agents+" online - tasks "+d.completedTasks+" - "+(d.payment?d.payment.pricePerAgent:"-")+" HIVE/agent"; }).catch(function(){}); }
+  function loadPay(){ return N.loadPay().then(function(c){ PAY=c; D("costHint").innerHTML="<b>"+N.esc(c.pricePerAgent)+"</b> HIVE per agent - a simple request uses 1 agent, a complex one more."; return c; }); }
+  function init(){
+    D("send").onclick=submit; D("estimateBtn").onclick=doEstimate; D("walletBtn").onclick=connectWallet; D("faucetBtn").onclick=faucet;
+    var inp=D("input"); inp.addEventListener("input",function(){ inp.style.height="auto"; inp.style.height=Math.min(inp.scrollHeight,170)+"px"; });
+    inp.addEventListener("keydown",function(e){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); submit(); } });
+    loadPay().catch(function(){}); loadAgents(); loadNetwork(); connectStream();
+    if(N.eth()){ N.eth().on && N.eth().on("accountsChanged",function(a){ walletState.account=(a&&a.length)?a[0]:null; renderWallet(); N.refreshBalance().then(renderWallet).catch(function(){}); }); N.rpc("eth_accounts").then(function(a){ if(a&&a.length){ walletState.account=a[0]; return N.refreshBalance().then(renderWallet); } }).catch(function(){}); }
+    setInterval(loadAgents,12000); setInterval(loadNetwork,12000);
+    notify("Welcome to Neural Hive - Decentralized Internet of AI. Connect MetaMask, add agents, and run a verified multi-agent request.",false);
+  }
+  if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
+})();

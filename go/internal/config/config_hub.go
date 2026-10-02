@@ -48,9 +48,32 @@ type Hub struct {
 	Network string
 	// QuoteTTL is how long a price quote stays valid.
 	QuoteTTL time.Duration
+	// HistoryLimit is how many prior chat turns are forwarded to the agents (HUB_HISTORY_LIMIT).
+	HistoryLimit int
+
+	// HubFeePercent is the share of each task payment the Hub keeps (HUB_FEE_PERCENT, default 2).
+	// The remainder is split equally among the agents that served the task. Set 0 for no fee.
+	HubFeePercent float64
+
+	// HubPrivateKey signs the on-chain settlement transfers and the agent-owner operations
+	// (HUB_PRIVATE_KEY, default PRIVATE_KEY_1, which is the deployer that owns the seed agents).
+	HubPrivateKey string
+	// AgentKeySeed derives each agent payout wallet deterministically (AGENT_KEY_SEED).
+	AgentKeySeed string
+
 	// SelfTestToken lets start.ps1 run its own verification without MetaMask (HUB_SELFTEST_TOKEN).
 	// It is generated per start and never stored in .env.
-	SelfTestToken string
+	// RegistryAddress is the deployed CapabilityRegistry agents register in on-chain.
+	RegistryAddress string
+	// WalletFactoryAddress is the deployed AgentWalletFactory that deploys one AgentWallet
+	// smart contract per agent (AGENT_WALLET_FACTORY_ADDRESS / deployments.json).
+	WalletFactoryAddress string
+
+	// RegistrationFee is the HIVE a wallet must pay to register an agent (HIVE_REGISTRATION_FEE, default 5).
+	RegistrationFee string
+	// RegistrationFeeWei is RegistrationFee in the token 18-decimal base unit.
+	RegistrationFeeWei *big.Int
+	SelfTestToken   string
 }
 
 // parseHiveAmount converts a decimal HIVE amount ("1", "0.5", "2.25") to 18-decimal base units.
@@ -162,6 +185,17 @@ func loadHub() Hub {
 	h.Treasury = strings.TrimSpace(get("HIVE_TREASURY_ADDRESS", ""))
 	h.QuoteTTL = time.Duration(getInt("HIVE_QUOTE_TTL_SECONDS", 900)) * time.Second
 	h.SelfTestToken = strings.TrimSpace(get("HUB_SELFTEST_TOKEN", ""))
+	h.HistoryLimit = getInt("HUB_HISTORY_LIMIT", 8)
+	h.HubFeePercent = getFloat("HUB_FEE_PERCENT", 2)
+	h.HubPrivateKey = strings.TrimSpace(get("HUB_PRIVATE_KEY", ""))
+	h.AgentKeySeed = strings.TrimSpace(get("AGENT_KEY_SEED", "neural-hive-devnet"))
+	h.RegistrationFee = strings.TrimSpace(get("HIVE_REGISTRATION_FEE", "5"))
+	rwei, rok := parseHiveAmount(h.RegistrationFee)
+	if !rok {
+		h.RegistrationFee = "5"
+		rwei, _ = parseHiveAmount("5")
+	}
+	h.RegistrationFeeWei = rwei
 	return h
 }
 

@@ -1,0 +1,102 @@
+// Send signs and submits a state-changing transaction and waits for it to be mined. A stale-nonce
+// rejection (several processes share the deployer key) is retried once with a freshly read on-chain
+// nonce, so transient nonce races self-heal instead of failing the caller.
+func (c *Client) Send(contract, method string, args ...interface{}) (*types.Receipt, error) {
+	var rc *types.Receipt
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		rc, err = c.sendOnce(contract, method, args...)
+		if err == nil || !isNonceError(err) {
+			return rc, err
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return rc, err
+}
+
+func (c *Client) sendOnce(contract, method string, args ...interface{}) (*types.Receipt, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	opts, err := bind.NewKeyedTransactorWithChainID(c.Key, c.ChainID)
+	if err != nil {
+		return nil, err
+	}
+	nonce, err := c.nextNonce()
+	if err != nil {
+		return nil, err
+	}
+	opts.Context = ctx
+	opts.Nonce = big.NewInt(int64(nonce))
+	opts.GasLimit = 7_500_000
+	opts.GasPrice = big.NewInt(2_000_000_000)
+	tx, err := c.bound(contract).Transact(opts, method, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s.%s: %w", contract, method, err)
+	}
+	c.nonce = nonce + 1
+	rc, err := bind.WaitMined(ctx, c.Eth, tx)
+	if err != nil {
+		c.lastTx = tx.Hash()
+		return nil, fmt.Errorf("wait mined %s.%s: %w", contract, method, err)
+	}
+	c.lastTx = tx.Hash()
+	if rc.Status == 0 {
+		return rc, fmt.Errorf("%s.%s reverted (tx %s)", contract, method, tx.Hash().Hex())
+	}
+	return rc, nil
+}
+
+// SendTxOnly submits a state-changing transaction and returns its hash, retrying once on a stale
+// nonce just like Send.
+func (c *Client) SendTxOnly(contract, method string, args ...interface{}) (common.Hash, error) {
+	var h common.Hash
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		h, err = c.sendTxOnlyOnce(contract, method, args...)
+		if err == nil || !isNonceError(err) {
+			return h, err
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return h, err
+}
+
+func (c *Client) sendTxOnlyOnce(contract, method string, args ...interface{}) (common.Hash, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	opts, err := bind.NewKeyedTransactorWithChainID(c.Key, c.ChainID)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	nonce, err := c.nextNonce()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	opts.Context = ctx
+	opts.Nonce = big.NewInt(int64(nonce))
+	opts.GasLimit = 7_500_000
+	opts.GasPrice = big.NewInt(2_000_000_000)
+	tx, err := c.bound(contract).Transact(opts, method, args...)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("%s.%s: %w", contract, method, err)
+	}
+	c.nonce = nonce + 1
+	rc, err := bind.WaitMined(ctx, c.Eth, tx)
+	if err != nil {
+		return tx.Hash(), err
+	}
+	if rc.Status == 0 {
+		return tx.Hash(), fmt.Errorf("%s.%s reverted (tx %s)", contract, method, tx.Hash().Hex())
+	}
+	return tx.Hash(), nil
+}

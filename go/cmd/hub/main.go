@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,9 +42,12 @@ func main() {
 	reg := hub.NewRegistry(stateFile)
 	for _, a := range cfg.Hub.Roster {
 		reg.Register(hub.AgentCard{
-			ID: a.ID, Index: a.Index, Port: a.Port, Endpoint: a.Endpoint(),
+			ID: a.ID, Index: a.Index, Port: a.Port, Endpoint: a.Endpoint(), Name: a.ID,
 			Tags: a.Tags, Model: a.Model, Status: "unknown",
 		})
+		reg.SetPrice(a.ID, priceFloat(cfg.Hub.PricePerAgentWei))
+
+		// Seed agents are owned by the Hub key (the deployer): it is their on-chain operator.
 	}
 	if err := reg.Load(); err != nil {
 		log.Printf("hub: no prior state (%v)", err)
@@ -51,6 +55,14 @@ func main() {
 
 	h := hub.New(cfg, reg)
 	h.Pay.LoadLedger(filepath.Join(filepath.Dir(stateFile), "hub-payments.jsonl"))
+	// Deploy/attach the per-agent AgentWallet smart contracts so each agent has its own on-chain
+	// wallet that holds its HIVE and that only the agent owner can withdraw from.
+	h.EnsureAllAgentWallets(context.Background())
+	// Make the Hub/deployer a registered on-chain agent so the owner can change agent prices from
+	// MetaMask (CapabilityRegistry.updatePrice requires the caller to be a registered operator).
+	if err := h.EnsureOwnerOnChain(context.Background()); err != nil {
+		log.Printf("hub: on-chain owner registration skipped: %v", err)
+	}
 	h.UILog = openFrontendLog(cfg.Root)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -84,4 +96,15 @@ func openFrontendLog(root string) *log.Logger {
 		return nil
 	}
 	return log.New(f, "", log.LstdFlags)
+}
+
+// priceFloat converts the configured per-agent price (18-decimal base units) to a float.
+func priceFloat(wei *big.Int) float64 {
+	if wei == nil {
+		return 0
+	}
+	f := new(big.Float).SetInt(wei)
+	f.Quo(f, big.NewFloat(1e18))
+	v, _ := f.Float64()
+	return v
 }

@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Neural Hive - Agentic AI Workspace</title>
+<style>
+  .prose table{border-collapse:collapse;margin:0 0 12px;font-size:13px;display:block;overflow-x:auto}
+.prose th,.prose td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.prose th{background:rgba(122,142,205,.12);color:#fff}
+.prose blockquote{margin:0 0 12px;padding:6px 14px;border-left:3px solid var(--purple);color:var(--muted)}
+.prose a{color:var(--cyan)}
+.prose hr{border:none;border-top:1px solid var(--line);margin:14px 0}
+:root{--bg:#070a14;--panel:rgba(20,27,48,.72);--panel2:rgba(13,18,34,.86);--line:rgba(122,142,205,.18);--line2:rgba(122,142,205,.10);--ink:#e9edfa;--muted:#93a2c6;--faint:#6b7aa0;--blue:#5b7cfa;--purple:#a855f7;--cyan:#22d3ee;--pink:#f472b6;--ok:#34d399;--bad:#f87171;--warn:#fbbf24;--grad:linear-gradient(135deg,#5b7cfa 0%,#a855f7 52%,#22d3ee 100%)}
+*{box-sizing:border-box}html,body{margin:0;padding:0;min-height:100%}
+body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:radial-gradient(1100px 620px at 8% -10%,rgba(91,124,250,.22) 0%,transparent 60%),radial-gradient(900px 520px at 100% 0%,rgba(168,85,247,.16) 0%,transparent 55%),radial-gradient(820px 600px at 50% 120%,rgba(34,211,238,.10) 0%,transparent 60%),var(--bg);background-attachment:fixed}
+::selection{background:rgba(124,92,255,.35)}
+.app{display:grid;grid-template-columns:274px 1fr;min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:14px;padding:20px 16px;border-right:1px solid var(--line2);background:linear-gradient(180deg,rgba(12,17,32,.92),rgba(8,12,24,.94));backdrop-filter:blur(14px);z-index:20}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 4px}
+.logo{width:34px;height:34px;border-radius:11px;background:var(--grad);box-shadow:0 0 22px rgba(124,92,255,.55);flex:none}
+.brand h1{font-size:16px;margin:0}.brand .sub{font-size:11px;color:var(--faint);margin-top:2px}
+.new-task{width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(124,92,255,.38);background:linear-gradient(135deg,rgba(91,124,250,.18),rgba(168,85,247,.18));color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+.new-task:hover{border-color:rgba(124,92,255,.7);box-shadow:0 0 18px rgba(124,92,255,.28)}
+.side-label{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:2px 6px}
+.task-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.task-item{padding:10px 11px;border-radius:11px;border:1px solid transparent;cursor:pointer}
+.task-item:hover{background:rgba(122,142,205,.07)}.task-item.active{background:rgba(91,124,250,.13);border-color:rgba(122,142,205,.3)}
+.task-item .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.task-item .m{font-size:11px;color:var(--faint);margin-top:3px}
+.side-foot{border-top:1px solid var(--line2);padding-top:12px;display:flex;flex-direction:column;gap:7px}
+.net-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.net-meta{font-size:10.5px;color:var(--faint);line-height:1.55;word-break:break-word}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}.dot.bad{background:var(--bad);box-shadow:0 0 10px var(--bad)}
+.main{display:flex;flex-direction:column;min-height:100vh}
+.topbar{position:sticky;top:0;z-index:6;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 32px;border-bottom:1px solid var(--line2);background:linear-gradient(180deg,rgba(7,10,20,.86),rgba(7,10,20,.55));backdrop-filter:blur(12px)}
+.top-left{display:flex;align-items:center;gap:12px;min-width:0}
+.top-title{font-size:15px;font-weight:640;max-width:52ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-sub{font-size:11.5px;color:var(--faint);margin-top:2px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;font-size:12px;background:var(--panel2);border:1px solid var(--line);white-space:nowrap}
+.menu-btn{display:none;width:38px;height:38px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:16px}
+.thread{flex:1;width:100%;max-width:920px;margin:0 auto;padding:28px 32px 20px;display:flex;flex-direction:column;gap:26px}
+.empty{margin:auto;text-align:center;color:var(--muted);max-width:580px;padding:40px 10px}
+.empty .glyph{width:56px;height:56px;border-radius:16px;margin:0 auto 18px;background:var(--grad);box-shadow:0 0 34px rgba(124,92,255,.45)}
+.empty h2{font-size:19px;margin:0 0 8px;color:var(--ink)}.empty p{font-size:13px;line-height:1.6;margin:0 0 18px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.chip{padding:8px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:12.5px;cursor:pointer}
+.chip:hover{color:var(--ink);border-color:rgba(122,142,205,.4);transform:translateY(-1px)}
+.msg{display:flex;flex-direction:column;gap:8px;animation:rise .28s ease}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.label .who{color:var(--muted)}
+.user-bubble{align-self:flex-start;max-width:80%;padding:13px 16px;border-radius:14px;background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.14));border:1px solid rgba(122,142,205,.26);font-size:14.5px;line-height:1.55;white-space:pre-wrap}
+.answer-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 14px 40px rgba(0,0,0,.32)}
+.prose{font-size:14.7px;line-height:1.72;color:#eef2fc}.prose p{margin:0 0 12px}.prose p:last-child{margin-bottom:0}
+.prose h1,.prose h2,.prose h3{margin:16px 0 9px;font-size:15.5px;color:#fff}.prose h1{font-size:17px}
+.prose ul,.prose ol{margin:0 0 12px;padding-left:22px}.prose li{margin:4px 0}
+.prose code{font-family:ui-monospace,Consolas,monospace;font-size:12.8px;background:rgba(122,142,205,.14);padding:1.5px 6px;border-radius:6px;color:#cfe0ff}
+.prose pre{margin:0 0 12px;padding:13px 15px;border-radius:11px;background:#080c18;border:1px solid var(--line);overflow:auto}.prose pre code{background:none;padding:0;color:#d7e3ff}
+.prose strong{color:#fff;font-weight:650}
+.exec{margin-top:16px;padding-top:14px;border-top:1px solid var(--line2)}
+.exec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.metric{background:var(--panel2);border:1px solid var(--line2);border-radius:11px;padding:10px 12px}
+.metric .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}.metric .v{font-size:13px;margin-top:5px;word-break:break-word;color:var(--ink)}
+details.tech{margin-top:12px;border:1px solid var(--line2);border-radius:11px;background:rgba(8,12,24,.5);overflow:hidden}
+details.tech summary{cursor:pointer;list-style:none;padding:11px 14px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+details.tech summary::-webkit-details-marker{display:none}
+details.tech summary:before{content:"+ ";color:var(--cyan)}details.tech[open] summary:before{content:"- "}
+details.tech .body{padding:2px 14px 14px}
+.kv{display:grid;grid-template-columns:190px 1fr;gap:6px 14px;font-size:12.3px}
+.kv .k{color:var(--faint)}.kv .v{color:var(--ink);word-break:break-word;font-family:ui-monospace,Consolas,monospace}
+.sect{margin:14px 0 6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+table.steps{width:100%;border-collapse:collapse;font-size:11.9px;margin-top:8px}
+table.steps th,table.steps td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:top}
+table.steps th{color:var(--faint);font-weight:600;font-size:10px;text-transform:uppercase}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;border:1px solid var(--line);margin:1px 2px}
+.tag.ok{color:var(--ok);border-color:rgba(52,211,153,.4)}.tag.bad{color:var(--bad);border-color:rgba(248,113,113,.4)}.tag.warn{color:var(--warn);border-color:rgba(251,191,36,.4)}.tag.cy{color:var(--cyan);border-color:rgba(34,211,238,.4)}
+.net{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.net-node{display:flex;gap:8px;font-size:12.3px;padding:7px 10px;border:1px solid var(--line2);border-radius:10px;background:rgba(8,12,24,.45)}
+.net-node .hub{color:var(--purple);font-weight:650}
+.trace{max-height:340px;overflow:auto;margin-top:8px;border:1px solid var(--line2);border-radius:10px;background:rgba(6,9,18,.6)}
+.trace-row{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:7px 11px;border-bottom:1px solid var(--line2);font-size:11.7px}
+.trace-row .st{color:var(--cyan);font-family:ui-monospace,monospace}.trace-row .dt{color:var(--muted)}
+.working{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13.5px}
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(122,142,205,.28);border-top-color:var(--cyan);animation:spin .8s linear infinite;flex:none}@keyframes spin{to{transform:rotate(360deg)}}
+.elapsed{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.errbox{border:1px solid rgba(248,113,113,.4);background:rgba(248,113,113,.08);border-radius:12px;padding:13px 15px;color:#ffd7d7;font-size:13px;line-height:1.55}
+.errbox .ttl{color:var(--bad);font-weight:650;margin-bottom:5px;font-size:12.5px}
+.composer{position:sticky;bottom:0;z-index:6;width:100%;max-width:920px;margin:0 auto;padding:10px 32px 24px}
+.composer-box{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:12px 14px;box-shadow:0 -6px 30px rgba(0,0,0,.35);backdrop-filter:blur(12px)}
+textarea{width:100%;background:transparent;border:none;outline:none;color:var(--ink);font:inherit;font-size:14.5px;line-height:1.5;resize:none;min-height:26px;max-height:180px}
+textarea::placeholder{color:var(--faint)}
+.composer-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
+.adv{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.adv label{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--faint)}
+.adv input{background:#0b1120;border:1px solid var(--line);border-radius:8px;color:var(--muted);padding:4px 6px;font-size:11px}
+.adv input[type=number]{width:58px}
+button.send{padding:10px 20px;border-radius:11px;border:none;background:var(--grad);color:#080c18;font-size:13.5px;font-weight:700;cursor:pointer}
+button.send:hover{box-shadow:0 0 22px rgba(124,92,255,.5)}button.send:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+@media (max-width:900px){.app{grid-template-columns:1fr}.sidebar{position:fixed;left:0;top:0;width:274px;transform:translateX(-100%);transition:.22s}.sidebar.open{transform:none}.thread{padding:20px 16px}.composer{padding:10px 16px 20px}.topbar{padding:14px 16px}.menu-btn{display:inline-flex}}
+.agent-list{display:flex;flex-direction:column;gap:6px;max-height:215px;overflow:auto;margin:2px 0 8px}
+.agent-row{border:1px solid var(--line2);border-radius:9px;padding:7px 9px;background:rgba(8,11,22,.55)}
+.ar-top{display:flex;align-items:center;gap:6px;font-size:11.5px}
+.ar-port{margin-left:auto;color:var(--muted);font-family:ui-monospace,monospace}
+.ar-tags{font-size:10.7px;color:var(--cyan);margin-top:3px}
+.ar-meta{font-size:10.4px;color:var(--muted);margin-top:2px}
+.ar-status{color:var(--muted);text-transform:uppercase;font-size:9.6px;letter-spacing:.08em}
+.pool-title{font-size:9.8px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em;margin-bottom:2px}
+
+.top-right{display:flex;align-items:center;gap:10px}
+.wallet{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;font:inherit;font-size:12px;font-weight:650;color:var(--ink);cursor:pointer;background:linear-gradient(135deg,rgba(245,133,27,.22),rgba(168,85,247,.18));border:1px solid rgba(245,133,27,.5)}
+.wallet:hover{box-shadow:0 0 18px rgba(245,133,27,.35)}
+.wallet .bal{color:var(--warn);font-weight:700}
+.notice{display:none;margin:0 0 10px;padding:10px 14px;border-radius:12px;border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.09);color:#ffe9b0;font-size:12.8px;line-height:1.5}
+.notice.show{display:block}.notice.bad{border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.09);color:#ffd7d7}
+.cost-hint{font-size:11.5px;color:var(--muted);margin-top:8px}.cost-hint b{color:var(--warn)}
+.paid{margin-top:12px;padding:10px 13px;border-radius:11px;border:1px solid rgba(52,211,153,.35);background:rgba(52,211,153,.07);font-size:12.3px;color:#c9f5e1;line-height:1.55;word-break:break-all}
+.paid b{color:#fff}.paid.free{border-color:rgba(122,142,205,.3);background:rgba(122,142,205,.07);color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="logo"></div><div><h1>Neural Hive</h1><div class="sub">Agentic AI workspace</div></div></div>
+    <button class="new-task" id="newTask">+ New Task</button>
+    <div class="side-label">History</div>
+    <div class="task-list" id="taskList"></div>
+    <div class="side-label">Agent pool</div>
+    <div class="agent-list" id="agentPool"></div>
+    <div class="side-foot">
+      <div class="net-row"><span class="dot" id="netDot"></span><span id="netText">connecting to hub...</span></div>
+      <div class="net-meta" id="netMeta"></div>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="menu-btn" id="menuBtn">&#9776;</button>
+        <div><div class="top-title" id="convTitle">New task</div><div class="top-sub" id="convSub">Neural Hive multi-agent hub</div></div>
+      </div>
+      <div class="top-right"><button class="wallet" id="walletBtn" title="Connect MetaMask">Connect MetaMask</button><div class="pill"><span class="dot" id="healthDot"></span><span id="healthText">connecting...</span></div></div>
+    </header>
+    <div class="thread" id="thread"></div>
+    <div class="composer">
+      <div class="notice" id="notice"></div>
+      <div class="composer-box">
+        <textarea id="input" rows="1" placeholder="Ask Neural Hive..."></textarea>
+        <div class="composer-row">
+          <div class="adv"><label>HIVE override <input id="hive" type="number" min="1" max="10" placeholder="auto" /></label></div>
+          <button class="send" id="send">Send</button>
+        </div>
+        <div class="cost-hint" id="costHint">Loading price...</div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+var API = (location.port === "9500") ? "" : "http://127.0.0.1:9500";
+var LSKEY = "neuralhive.hub.workspace.v1";
+var SUGGESTIONS = [
+  "What is distributed consensus?",
+  "Analyze the architecture of a decentralized AI agent network, identify security risks, and propose an implementation strategy.",
+  "Compare optimistic verification and replicated Krum for a multi-agent network."
+];
+var state = { tasks: [], activeId: null };
+var running = false;
+function $(id){ return document.getElementById(id); }
+function esc(s){ var A=String.fromCharCode(38); var t=(s==null)?"":String(s); return t.split(A).join(A+"amp;").replace(/</g,A+"lt;").replace(/>/g,A+"gt;"); }
+function load(){ try{ var raw=localStorage.getItem(LSKEY); if(raw){ var p=JSON.parse(raw); if(p&&p.tasks){ state=p; } } }catch(e){} if(!state.activeId&&state.tasks.length){ state.activeId=state.tasks[0].id; } }
+function save(){ try{ localStorage.setItem(LSKEY,JSON.stringify(state)); }catch(e){} }
+function activeTask(){ for(var i=0;i<state.tasks.length;i++){ if(state.tasks[i].id===state.activeId){ return state.tasks[i]; } } return null; }
+function uid(p){ return p+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function closeMenu(){ $("sidebar").classList.remove("open"); }
+function fmt(x,n){ if(typeof x!=="number"){ return (x==null||x==="")?"-":x; } return x.toFixed(n==null?4:n); }
+function tx(h){ if(!h||typeof h!=="string"){ return "-"; } if(h.length<=26){ return esc(h); } return esc(h.slice(0,14)+"..."+h.slice(-10)); }
+function inline(t){
+  var s=esc(t);
+  s=s.replace(/`([^`]+)`/g,"<code>$1</code>");
+  s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  s=s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g,"$1<em>$2</em>");
+  s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s;
+}
+function renderMD(text){
+  var src=(text==null)?"":String(text);
+  var lines=src.replace(/\r\n/g,"\n").split("\n");
+  var out=[]; var i=0;
+  function isBullet(l){ return /^\s*[-*]\s+/.test(l); }
+  function isNum(l){ return /^\s*\d+\.\s+/.test(l); }
+  function isHead(l){ return /^#{1,6}\s+/.test(l); }
+  function isFence(l){ return /^```/.test(l); }
+  function isRule(l){ return /^\s*(-{3,}|\*{3,})\s*$/.test(l); }
+  function isTableSep(l){ return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(l); }
+  function cells(l){ return l.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(function(c){ return c.trim(); }); }
+  while(i<lines.length){
+    var ln=lines[i];
+    if(isFence(ln)){ i++; var buf=[]; while(i<lines.length&&!isFence(lines[i])){ buf.push(lines[i]); i++; } i++; out.push("<pre><code>"+esc(buf.join("\n"))+"</code></pre>"); continue; }
+    var m=ln.match(/^(#{1,6})\s+(.*)$/);
+    if(m){ var lvl=Math.min(m[1].length,6); out.push("<h"+lvl+">"+inline(m[2])+"</h"+lvl+">"); i++; continue; }
+    if(isRule(ln)){ out.push("<hr>"); i++; continue; }
+    if(ln.indexOf("|")>=0&&i+1<lines.length&&isTableSep(lines[i+1])){
+      var hd=cells(ln); i+=2; var rows=[];
+      while(i<lines.length&&lines[i].indexOf("|")>=0&&lines[i].trim()!==""){ rows.push(cells(lines[i])); i++; }
+      var t="<table><thead><tr>"+hd.map(function(c){ return "<th>"+inline(c)+"</th>"; }).join("")+"</tr></thead><tbody>";
+      rows.forEach(function(r){ t+="<tr>"+r.map(function(c){ return "<td>"+inline(c)+"</td>"; }).join("")+"</tr>"; });
+      out.push(t+"</tbody></table>"); continue;
+    }
+    if(/^>\s?/.test(ln)){ var q=[]; while(i<lines.length&&/^>\s?/.test(lines[i])){ q.push(lines[i].replace(/^>\s?/,"")); i++; } out.push("<blockquote>"+inline(q.join("<br>"))+"</blockquote>"); continue; }
+    if(isBullet(ln)){ var li=[]; while(i<lines.length&&isBullet(lines[i])){ li.push("<li>"+inline(lines[i].replace(/^\s*[-*]\s+/,""))+"</li>"); i++; } out.push("<ul>"+li.join("")+"</ul>"); continue; }
+    if(isNum(ln)){ var lo=[]; while(i<lines.length&&isNum(lines[i])){ lo.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+lo.join("")+"</ol>"); continue; }
+    if(ln.trim()===""){ i++; continue; }
+    var para=[]; while(i<lines.length&&lines[i].trim()!==""&&!isHead(lines[i])&&!isFence(lines[i])&&!isBullet(lines[i])&&!isNum(lines[i])&&!isRule(lines[i])&&!/^>\s?/.test(lines[i])){ para.push(lines[i]); i++; }
+    out.push("<p>"+inline(para.join("<br>"))+"</p>");
+  }
+  return out.join("");
+}
+
+function metric(k,v){ return "<div class='metric'><div class='k'>"+esc(k)+"</div><div class='v'>"+esc(v==null?"-":v)+"</div></div>"; }
+function kv(k,v){ return "<div class='k'>"+esc(k)+"</div><div class='v'>"+esc(v==null||v===""?"-":v)+"</div>"; }
+function tags(arr){ if(!arr||!arr.length){ return "<span class='tag'>none</span>"; } var s=""; for(var i=0;i<arr.length;i++){ s+="<span class='tag cy'>"+esc(arr[i])+"</span>"; } return s; }
+function shortId(x){ if(!x||typeof x!=="string"){ return "-"; } return esc(x.length<=26?x:x.slice(0,14)+"..."+x.slice(-10)); }
+function techHTML(r){
+  var h = "<details class='tech'><summary>Show execution details</summary><div class='body'>";
+  var cx = r.complexity || {};
+  var results = r.agentResults || [];
+  var resBySub = {};
+  for(var i=0;i<results.length;i++){ resBySub[results[i].subtaskId] = results[i]; }
+  h += "<div class='sect'>Task</div><div class='kv'>";
+  h += kv("Task ID", r.taskId);
+  h += kv("Complexity", (cx.level||"-")+" (score "+(cx.score==null?"-":cx.score)+")");
+  h += kv("Signals", (cx.signals&&cx.signals.length)?cx.signals.join("; "):"-");
+  h += kv("Domains", (cx.domains&&cx.domains.length)?cx.domains.join(", "):"-");
+  h += kv("HIVE (agents required)", r.hive);
+  h += kv("Subtasks", (r.subtasks||[]).length);
+  h += kv("Agents used", (r.agentsUsed||[]).join(", "));
+  h += kv("Elapsed", fmt((r.elapsedMs||0)/1000,2)+" s");
+  h += "</div>";
+  var pm = r.payment || null;
+  if(pm){
+    h += "<div class='sect'>Payment (HIVE)</div><div class='kv'>";
+    h += kv("Mode", pm.mode==="onchain"?"paid on-chain from MetaMask":(pm.mode==="selftest"?"startup self-test (no payment)":"payment not required"));
+    h += kv("Agents (HIVE)", pm.agents);
+    h += kv("Price per agent", pm.pricePerAgent+" HIVE");
+    h += kv("Cost of this request", pm.costHive+" HIVE");
+    h += kv("Paid", pm.paidHive+" HIVE");
+    h += kv("Payer", pm.payer);
+    h += kv("Treasury", pm.treasury);
+    h += kv("HIVE token", pm.token);
+    h += kv("Payment tx", pm.txHash);
+    h += kv("Block", pm.blockNumber);
+    h += kv("Chain id", pm.chainId);
+    h += kv("Quote id", pm.quoteId);
+    h += "</div>";
+  }
+  h += "<div class='sect'>Agent network</div><div class='net'>";
+  h += "<div class='net-node'><span class='hub'>HUB</span><span>central orchestrator</span></div>";
+  var sel = r.selections||[];
+  for(var j=0;j<sel.length;j++){ var s=sel[j]; var rr=resBySub[s.subtaskId]||{}; h += "<div class='net-node'><span class='hub'>|--</span><b>"+esc(s.agentId)+"</b><span>port "+(rr.port==null?"-":rr.port)+"</span>"+tags(s.matchingTags&&s.matchingTags.length?s.matchingTags:s.requiredTags)+"</div>"; }
+  h += "</div>";
+  h += "<div class='sect'>Subtasks and routing</div><table class='steps'><thead><tr><th>Subtask</th><th>Required tags</th><th>Selected agent</th><th>Port</th><th>Latency</th><th>Status</th></tr></thead><tbody>";
+  for(var k=0;k<sel.length;k++){ var s2=sel[k]; var rr2=resBySub[s2.subtaskId]||{}; var st=rr2.status||"?"; var cls=st==="ok"?"ok":(st==="failed"?"bad":"warn"); h += "<tr><td>"+esc(s2.subtaskId)+"</td><td>"+tags(s2.requiredTags)+"</td><td>"+esc(s2.agentId)+"</td><td>"+(rr2.port==null?"-":rr2.port)+"</td><td>"+(rr2.latencyMs==null?"-":rr2.latencyMs+" ms")+"</td><td><span class='tag "+cls+"'>"+esc(st)+"</span></td></tr>"; }
+  h += "</tbody></table>";
+  h += "<div class='sect'>Agent selection detail</div>";
+  for(var m=0;m<sel.length;m++){ var s3=sel[m]; var rr3=resBySub[s3.subtaskId]||{}; h += "<div class='kv'>"; h += kv("Subtask "+s3.subtaskId+" requires", (s3.requiredTags||[]).join(", ")); h += kv("Agent", s3.agentId); h += kv("Matching tags", (s3.matchingTags&&s3.matchingTags.length)?s3.matchingTags.join(", "):"none"); h += kv("Port", rr3.port); h += kv("Reputation before -> after", fmt(s3.reputation,3)+" -> "+fmt(rr3.reputationAfter,3)); h += kv("Risk before -> after", fmt(s3.risk,3)+" -> "+fmt(rr3.riskAfter,3)); h += kv("Selection score", fmt(s3.score,3)); h += kv("Reason", s3.reason); h += kv("Provider / model", (rr3.provider||"-")+" / "+(rr3.model||"-")); h += kv("Request id", rr3.requestId); h += kv("Timing", (rr3.startedAt||"-")+" -> "+(rr3.finishedAt||"-")); h += kv("Response hash", rr3.hash); if(rr3.error){ h += kv("Error", rr3.error); } h += "</div>"; }
+  var ag = r.aggregation||{};
+  h += "<div class='sect'>Aggregation</div><div class='kv'>";
+  h += kv("Inputs", ag.inputs);
+  h += kv("Model / provider", (ag.model||"-")+" / "+(ag.provider||"-"));
+  h += kv("Status", ag.ok?"ok":("failed: "+(ag.error||"-")));
+  h += kv("Latency", ag.latencyMs==null?"-":ag.latencyMs+" ms");
+  h += "</div>";
+  var an = r.anchor||{};
+  h += "<div class='sect'>Verification (hash / blockchain)</div><div class='kv'>";
+  h += kv("Answer hash", r.answerHash);
+  h += kv("Anchored on-chain", an.ok?"yes":("no: "+(an.error||"-")));
+  h += kv("Request id", an.requestId);
+  h += kv("Request tx", an.requestTx);
+  h += kv("Settlement tx", an.settleTx);
+  h += kv("Network", an.network);
+  h += kv("Chain id", an.chainId);
+  h += kv("Coordinator contract", an.coordinator);
+  h += "</div>";
+  var tr = r.trace||[];
+  h += "<div class='sect'>Execution trace</div><div class='trace'>";
+  for(var t=0;t<tr.length;t++){ var e=tr[t]; h += "<div class='trace-row'><div class='st'>"+esc(e.stage)+"</div><div class='dt'>"+esc(e.detail)+" | "+esc(e.at)+"</div></div>"; }
+  h += "</div>";
+  return h+"</div></details>";
+}
+function answerHTML(r){
+  var h = "<div class='answer-card'>";
+  if(r.answer){ h += "<div class='prose'>"+renderMD(r.answer)+"</div>"; }
+  else { var msg = (r.aggregation&&r.aggregation.error)?r.aggregation.error:"The agents did not return an answer."; h += "<div class='errbox'><div class='ttl'>No answer was produced</div>"+esc(msg)+"</div>"; }
+  var cx = r.complexity||{};
+  var ar = r.agentResults||[];
+  h += "<div class='exec'><div class='exec-grid'>";
+  h += metric("Complexity", cx.level||"-");
+  h += metric("HIVE (agents)", r.hive);
+  h += metric("Cost", costText(r.payment));
+  h += metric("Agents", (r.agentsUsed||[]).length+" ("+(r.agentsUsed||[]).join(", ")+")");
+  h += metric("Provider", ar.length?(ar[0].provider||"-"):"-");
+  h += metric("Model", (r.aggregation&&r.aggregation.model)?r.aggregation.model:(ar.length?ar[0].model:"-"));
+  h += metric("Duration", fmt((r.elapsedMs||0)/1000,2)+" s");
+  h += "</div>";
+  h += paidLine(r.payment);
+  if(r.errors&&r.errors.length){ h += "<div class='errbox' style='margin-top:12px'><div class='ttl'>Partial failure</div>"+esc(r.errors.join(" | "))+"</div>"; }
+  h += techHTML(r);
+  h += "</div></div>";
+  return h;
+}
+function exchangeHTML(ex){
+  var h = "<div class='msg'><div class='label'><span class='who'>You</span></div><div class='user-bubble'>"+esc(ex.q)+"</div></div>";
+  h += "<div class='msg'><div class='label'><span class='who'>Neural Hive Hub</span></div>";
+  if(ex.status==="running"){ h += "<div class='answer-card'><div class='working'><span class='spinner'></span><span data-phase='"+ex.id+"'>"+esc(ex.phase||"Hub is classifying, decomposing, routing and executing independent agents")+"</span><span class='elapsed' data-elapsed='"+ex.id+"'>0.0s</span></div></div>"; }
+  else if(ex.status==="error"){ h += "<div class='errbox'><div class='ttl'>Request failed</div>"+esc(ex.error)+"<div class='net-meta'>No answer was fabricated; the Hub surfaces the real error.</div></div>"; }
+  else if(ex.result){ h += answerHTML(ex.result); }
+  h += "</div>";
+  return h;
+}
+function emptyState(){
+  var chips="";
+  for(var i=0;i<SUGGESTIONS.length;i++){ chips += "<span class='chip' data-chip='"+i+"'>"+esc(SUGGESTIONS[i])+"</span>"; }
+  return "<div class='empty'><div class='glyph'></div><h2>Ask Neural Hive anything</h2><p>Your task is classified, decomposed, routed to independent DeepSeek agents by capability, executed concurrently, aggregated and anchored on-chain. Each request is paid in HIVE from your MetaMask wallet: pressing Send connects MetaMask and sends the payment. Expand any answer for the full execution trace and the payment receipt.</p><div class='chips'>"+chips+"</div></div>";
+}
+function bindChips(){ var chips=document.querySelectorAll("[data-chip]"); for(var i=0;i<chips.length;i++){ chips[i].onclick=function(){ var idx=parseInt(this.getAttribute("data-chip"),10)||0; $("input").value=SUGGESTIONS[idx]||""; autoGrow(); $("input").focus(); closeMenu(); }; } }
+function renderThread(){ var t=activeTask(); var th=$("thread"); if(!t||!t.exchanges.length){ th.innerHTML=emptyState(); bindChips(); return; } var h=""; for(var i=0;i<t.exchanges.length;i++){ h+=exchangeHTML(t.exchanges[i]); } th.innerHTML=h; }
+function renderSidebar(){ var t=activeTask(); $("convTitle").textContent=t?t.title:"New task"; var list=$("taskList"); if(!state.tasks.length){ list.innerHTML="<div class='task-item'><div class='t'>No tasks yet</div><div class='m'>Start with New Task</div></div>"; return; } var h=""; for(var i=0;i<state.tasks.length;i++){ var tk=state.tasks[i]; var act=tk.id===state.activeId?" active":""; var n=tk.exchanges.length; var when=new Date(tk.createdAt).toLocaleString(); h+="<div class='task-item"+act+"' data-task='"+tk.id+"'><div class='t'>"+esc(tk.title)+"</div><div class='m'>"+n+(n===1?" query":" queries")+" - "+esc(when)+"</div></div>"; } list.innerHTML=h; var items=list.querySelectorAll("[data-task]"); for(var j=0;j<items.length;j++){ items[j].onclick=function(){ state.activeId=this.getAttribute("data-task"); save(); render(); closeMenu(); }; } }
+function render(){ renderSidebar(); renderThread(); }
+function newTask(){ var t={ id: uid("t"), title:"New task", createdAt: Date.now(), exchanges: [] }; state.tasks.unshift(t); state.activeId=t.id; save(); render(); $("input").focus(); }
+function autoGrow(){ var el=$("input"); el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,180)+"px"; }
+var PAY = null;
+var wallet = { account: null, hiveWei: null, ethWei: null };
+var ZERO = BigInt(0), UNIT = BigInt("1000000000000000000");
+function eth(){ return window.ethereum || null; }
+function rpc(method, params){ return eth().request({ method: method, params: params || [] }); }
+function pad32(hex){ var h=String(hex).replace(/^0x/,"").toLowerCase(); while(h.length<64){ h="0"+h; } return h; }
+function encTransfer(to, amountWei){ return "0xa9059cbb"+pad32(to)+pad32(BigInt(amountWei).toString(16)); }
+function encBalanceOf(addr){ return "0x70a08231"+pad32(addr); }
+function hiveStr(wei){
+  var b=BigInt(wei); var w=b/UNIT; var r=b%UNIT; if(r===ZERO){ return w.toString(); }
+  var f=r.toString(); while(f.length<18){ f="0"+f; } f=f.replace(/0+$/,""); if(f.length>4){ f=f.slice(0,4).replace(/0+$/,""); } if(!f&&w===ZERO){ return "<0.0001"; } return w.toString()+(f?"."+f:"");
+}
+function shortAddr(a){ return (a&&a.length>12)?a.slice(0,6)+"..."+a.slice(-4):(a||""); }
+function costText(p){
+  if(!p){ return "-"; }
+  if(p.mode==="onchain"){ return p.paidHive+" HIVE ("+p.agents+" x "+p.pricePerAgent+")"; }
+  return p.costHive+" HIVE ("+p.agents+" x "+p.pricePerAgent+", not charged)";
+}
+function paidLine(p){
+  if(!p){ return ""; }
+  if(p.mode==="onchain"){
+    return "<div class='paid'><b>Paid "+esc(p.paidHive)+" HIVE</b> for "+esc(p.agents)+" agent"+(p.agents===1?"":"s")+" at "+esc(p.pricePerAgent)+" HIVE each<br>from "+esc(p.payer)+"<br>tx "+esc(p.txHash)+" (block "+esc(p.blockNumber)+")</div>";
+  }
+  return "<div class='paid free'>This request would cost "+esc(p.costHive)+" HIVE ("+esc(p.agents)+" x "+esc(p.pricePerAgent)+"). No payment was taken ("+(p.mode==="selftest"?"startup self-test":"payment disabled")+").</div>";
+}
+function notify(msg, bad){ var n=$("notice"); if(!msg){ n.className="notice"; n.textContent=""; return; } n.className="notice show"+(bad?" bad":""); n.textContent=msg; }
+function readJSON(res){ return res.text().then(function(txt){ var d={}; try{ d=txt?JSON.parse(txt):{}; }catch(e){ d={ error:txt }; } d.__status=res.status; d.__ok=res.ok; return d; }); }
+function errText(e){
+  if(!e){ return "Unknown error"; }
+  if(e.code===4001){ return "You rejected the request in MetaMask. Nothing was charged."; }
+  if(e.code===-32002){ return "A MetaMask request is already open. Open the MetaMask window and finish or reject it, then press Send again."; }
+  return e.message?e.message:String(e);
+}
+function loadPayCfg(){
+  return fetch(API+"/payment/config").then(function(r){ return r.json(); }).then(function(c){ PAY=c; updateCostHint(); return c; });
+}
+function updateCostHint(){
+  var el=$("costHint"); if(!el){ return; }
+  if(!PAY){ el.textContent="Price unavailable: the Hub is offline."; return; }
+  var hv=parseInt($("hive").value,10);
+  var base="<b>"+esc(PAY.pricePerAgent)+" HIVE</b> per agent (a simple request uses 1 agent, a complex one more)";
+  if(hv>0){ base+=" - this request: <b>"+esc(hiveStr(BigInt(PAY.pricePerAgentWei)*BigInt(hv)))+" HIVE</b> for "+hv+" agent"+(hv===1?"":"s"); }
+  el.innerHTML=PAY.paymentRequired?(base+". Press Send to connect MetaMask and pay in HIVE."):(base+". Payment is currently disabled; cost is shown for information."); 
+}
+function renderWallet(){
+  var b=$("walletBtn");
+  if(!wallet.account){ b.innerHTML="Connect MetaMask"; return; }
+  b.innerHTML=esc(shortAddr(wallet.account))+" <span class='bal'>"+(wallet.hiveWei==null?"...":esc(hiveStr(wallet.hiveWei)))+" HIVE</span>";
+}
+function refreshBalance(){
+  if(!wallet.account||!PAY||!PAY.token){ return Promise.resolve(); }
+  return rpc("eth_call",[{ to: PAY.token, data: encBalanceOf(wallet.account) }, "latest"]).then(function(hex){
+    wallet.hiveWei=BigInt(hex&&hex!=="0x"?hex:"0x0");
+    return rpc("eth_getBalance",[wallet.account,"latest"]);
+  }).then(function(hex){ wallet.ethWei=BigInt(hex); renderWallet(); });
+}
+function ensureChain(){
+  var want=PAY.chainIdHex;
+  return rpc("eth_chainId").then(function(cur){
+    if(String(cur).toLowerCase()===String(want).toLowerCase()){ return; }
+    return rpc("wallet_switchEthereumChain",[{ chainId: want }]).catch(function(e){
+      var missing=e&&(e.code===4902||/unrecognized chain|not been added/i.test(e.message||""));
+      if(!missing){ throw e; }
+      return rpc("wallet_addEthereumChain",[{ chainId: want, chainName: "Neural Hive Devnet", nativeCurrency:{ name:"Ether", symbol:"ETH", decimals:18 }, rpcUrls:[PAY.rpcUrl] }]);
+    });
+  });
+}
+function connectWallet(){
+  if(!eth()){ return Promise.reject(new Error("MetaMask was not found in this browser. Install the MetaMask extension (https://metamask.io), then press Send again.")); }
+  return (PAY?Promise.resolve(PAY):loadPayCfg()).then(function(){ return rpc("eth_requestAccounts"); }).then(function(accs){
+    if(!accs||!accs.length){ throw new Error("No MetaMask account was selected."); }
+    wallet.account=accs[0]; renderWallet();
+    return ensureChain();
+  }).then(function(){ return refreshBalance(); });
+}
+function waitReceipt(txHash){
+  var t0=Date.now();
+  function poll(){
+    return rpc("eth_getTransactionReceipt",[txHash]).then(function(rc){
+      if(rc){ if(rc.status==="0x0"){ throw new Error("The HIVE payment transaction was reverted on chain. Nothing was charged."); } return rc; }
+      if(Date.now()-t0>120000){ throw new Error("The payment transaction was not confirmed within 2 minutes (tx "+txHash+")."); }
+      return new Promise(function(res){ setTimeout(res,1200); }).then(poll);
+    });
+  }
+  return poll();
+}
+function topUpIfNeeded(q, setPhase){
+  var need=BigInt(q.costWei);
+  var lowHive=(wallet.hiveWei==null)||(wallet.hiveWei<need);
+  var lowGas=(wallet.ethWei==null)||(wallet.ethWei<BigInt("5000000000000000"));
+  if(!lowHive&&!lowGas){ return Promise.resolve(); }
+  if(!PAY.faucet){
+    if(lowHive){ throw new Error("Your wallet holds "+hiveStr(wallet.hiveWei||ZERO)+" HIVE but this request costs "+q.costHive+" HIVE. Add HIVE ("+PAY.token+") to "+wallet.account+" and press Send again."); }
+    return Promise.resolve();
+  }
+  setPhase("Wallet is short of "+(lowHive?"HIVE":"gas")+" - requesting test funds from the devnet faucet");
+  return fetch(API+"/faucet",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ address: wallet.account }) })
+    .then(readJSON).then(function(d){ if(!d.__ok||d.ok===false){ throw new Error("Faucet failed: "+(d.error||("HTTP "+d.__status))); } return refreshBalance(); })
+    .then(function(){ if(wallet.hiveWei<need){ throw new Error("After the faucet your wallet still holds less than "+q.costHive+" HIVE."); } });
+}
+function sendHive(q, setPhase){
+  return topUpIfNeeded(q, setPhase).then(function(){
+    setPhase("Confirm the "+q.costHive+" HIVE payment in MetaMask");
+    return rpc("eth_sendTransaction",[{ from: wallet.account, to: PAY.token, value: "0x0", data: encTransfer(q.treasury, q.costWei) }]);
+  }).then(function(txHash){
+    setPhase("Payment sent, waiting for the chain to confirm it (tx "+txHash.slice(0,12)+"...)");
+    return waitReceipt(txHash).then(function(){ return txHash; });
+  });
+}
+function postTask(payload){
+  return fetch(API+"/task",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) })
+    .then(readJSON).then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error?d.error:("HTTP "+d.__status)); } return d; });
+}
+function submit(){
+  if(running){ return; }
+  var q=$("input").value.trim();
+  if(!q){ return; }
+  notify("");
+  running=true; $("send").disabled=true;
+  var hv=parseInt($("hive").value,10);
+  var base={ task:q }; if(hv>0){ base.hive=hv; }
+  var needsPayment=!PAY||PAY.paymentRequired!==false;
+  var step=(PAY&&PAY.paymentRequired===false)?Promise.resolve(null):(function(){
+    $("send").textContent="Connecting MetaMask...";
+    return connectWallet();
+  })();
+  step.then(function(){
+    if(PAY&&PAY.paymentRequired===false){ return null; }
+    $("send").textContent="Pricing...";
+    return fetch(API+"/quote",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(base) }).then(readJSON).then(function(d){ if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); } return d; });
+  }).then(function(quote){
+    var t=activeTask(); if(!t){ newTask(); t=activeTask(); }
+    var ex={ id: uid("e"), q:q, status:"running", startedAt: Date.now(), result:null, error:null, phase: quote?("Quoted "+quote.costHive+" HIVE for "+quote.hive+" agent"+(quote.hive===1?"":"s")):null };
+    t.exchanges.push(ex);
+    if(t.exchanges.length===1){ t.title=q.length>70?q.slice(0,70)+"...":q; }
+    state.activeId=t.id; $("input").value=""; autoGrow();
+    save(); render();
+    var t0=Date.now();
+    var timer=setInterval(function(){ var el=document.querySelector("[data-elapsed='"+ex.id+"']"); if(el){ el.textContent=((Date.now()-t0)/1000).toFixed(1)+"s"; } },100);
+    function setPhase(txt){ ex.phase=txt; var el=document.querySelector("[data-phase='"+ex.id+"']"); if(el){ el.textContent=txt; } }
+    var paying=quote?sendHive(quote,setPhase):Promise.resolve(null);
+    return paying.then(function(txHash){
+      var payload={ task:q };
+      if(quote){ payload.quoteId=quote.quoteId; payload.hive=quote.hive; payload.txHash=txHash; setPhase("Payment confirmed - Hub is verifying it on chain, then routing and executing the agents"); }
+      else if(hv>0){ payload.hive=hv; }
+      return postTask(payload);
+    }).then(function(data){ ex.result=data; ex.status="done"; })
+      .catch(function(e){ ex.status="error"; ex.error=errText(e); if(quote&&!ex.result){ $("input").value=q; autoGrow(); } })
+      .then(function(){ clearInterval(timer); ex.endedAt=Date.now(); save(); render(); return refreshBalance().catch(function(){}); });
+  }).catch(function(e){
+    notify(errText(e), true);
+  }).then(function(){
+    running=false; $("send").disabled=false; $("send").textContent="Send";
+  });
+}
+function pollAgents(){
+  fetch(API+"/agents").then(function(r){ return r.json(); }).then(function(d){
+    var pool=$("agentPool"); if(!pool){ return; } var list=(d&&d.agents)?d.agents:[]; var h="<div class=pool-title>"+list.length+" agents configured</div>";
+    for(var i=0;i<list.length;i++){ var a=list[i];
+      h+="<div class=agent-row><div class=ar-top><b>"+esc(a.id)+"</b><span class=ar-port>:"+(a.port==null?"-":a.port)+"</span><span class=ar-status>"+esc(a.status)+"</span></div>"
+        +"<div class=ar-tags>"+esc((a.tags||[]).join(", "))+"</div>"
+        +"<div class=ar-meta>"+esc(a.provider||"-")+" / "+esc(a.model||"-")+" | rep "+fmt(a.reputation,2)+" | risk "+fmt(a.risk,2)+"</div>"
+        +"<div class=ar-meta>ok "+a.success+" | fail "+a.failure+" | avg "+(a.avgLatencyMs==null?"-":a.avgLatencyMs+" ms")+"</div></div>";
+    }
+    pool.innerHTML=h;
+  }).catch(function(){});
+}
+function poll(){
+  fetch(API+"/health").then(function(r){ return r.json(); }).then(function(){ $("netDot").className="dot ok"; $("healthDot").className="dot ok"; $("healthText").textContent="Online"; $("netText").textContent="Hub online"; }).catch(function(){ $("netDot").className="dot bad"; $("healthDot").className="dot bad"; $("healthText").textContent="Offline"; $("netText").textContent="Hub offline"; });
+  fetch(API+"/network").then(function(r){ return r.json(); }).then(function(nn){ $("netMeta").textContent="agents "+nn.online+"/"+nn.agents+" online | tasks "+nn.completedTasks+" | hive "+nn.hive.default+"/"+nn.hive.complex+"/"+nn.hive.max+" | "+nn.provider+"/"+nn.aggregatorModel+((nn.payment&&nn.payment.pricePerAgent)?" | "+nn.payment.pricePerAgent+" HIVE/agent":""); }).catch(function(){});
+}
+$("newTask").onclick=function(){ newTask(); closeMenu(); };
+$("send").onclick=submit;
+$("hive").addEventListener("input",updateCostHint);
+$("walletBtn").onclick=function(){ notify(""); connectWallet().catch(function(e){ notify(errText(e), true); }); };
+if(eth()){
+  eth().on&&eth().on("accountsChanged",function(a){ wallet.account=(a&&a.length)?a[0]:null; wallet.hiveWei=null; renderWallet(); refreshBalance().catch(function(){}); });
+  eth().on&&eth().on("chainChanged",function(){ refreshBalance().catch(function(){}); });
+}
+$("input").addEventListener("input",autoGrow);
+$("input").addEventListener("keydown",function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); submit(); } });
+$("menuBtn").onclick=function(){ $("sidebar").classList.toggle("open"); };
+load(); if(!state.tasks.length){ newTask(); } else { render(); }
+autoGrow(); poll(); pollAgents();
+loadPayCfg().then(function(){
+  if(eth()&&PAY&&PAY.paymentRequired){ rpc("eth_accounts").then(function(a){ if(a&&a.length){ wallet.account=a[0]; renderWallet(); refreshBalance().catch(function(){}); } }).catch(function(){}); }
+}).catch(function(){ updateCostHint(); }); setInterval(poll,8000); setInterval(pollAgents,10000);
+</script>
+</body>
+</html>

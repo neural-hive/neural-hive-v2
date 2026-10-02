@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/neural-hive/hive-node/internal/deepworker"
 )
 
 // HealthCheck probes every registered agent once and records its health, provider and model.
@@ -59,9 +61,37 @@ func (h *Hub) StartHealthPoller(ctx context.Context, interval time.Duration) {
 				return
 			case <-t.C:
 				h.HealthCheck(ctx)
+				h.EnrichAllAgentIdentities(ctx)
 			}
 		}
 	}()
+}
+
+// trimHistory keeps only the most recent HistoryLimit turns so the agents receive a bounded,
+// well-formed conversation window from the browser.
+func (h *Hub) trimHistoryLimit(in []deepworker.ChatTurn, limit int) []deepworker.ChatTurn {
+	// A negative limit means the caller asked for the whole conversation (no cap).
+	if limit == 0 {
+		limit = h.Cfg.HistoryLimit
+	}
+	if limit < 0 {
+		limit = len(in)
+	}
+	out := make([]deepworker.ChatTurn, 0, len(in))
+	for _, t := range in {
+		role := strings.ToLower(strings.TrimSpace(t.Role))
+		if role != "user" && role != "assistant" && role != "system" {
+			continue
+		}
+		if strings.TrimSpace(t.Content) == "" {
+			continue
+		}
+		out = append(out, deepworker.ChatTurn{Role: role, Content: t.Content})
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -96,9 +126,13 @@ func (h *Hub) Handler(webDir string) http.Handler {
 	// needs and the cost in HIVE, plus the token, treasury and chain MetaMask must use.
 	mux.HandleFunc("POST /quote", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Task    string `json:"task"`
-			Request string `json:"request"`
-			HIVE    int    `json:"hive"`
+			Task        string `json:"task"`
+			Request     string `json:"request"`
+			HIVE        int    `json:"hive"`
+			Routing     string `json:"routing"`
+			Aggregation string `json:"aggregation"`
+			Byzantine   int    `json:"byzantine"`
+			KrumM       int    `json:"krumM"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
@@ -112,7 +146,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "task is required"})
 			return
 		}
-		q := h.Quote(text, body.HIVE)
+		q := h.Quote(text, body.HIVE, AlgConfig{Routing: body.Routing, Aggregation: body.Aggregation, Byzantine: body.Byzantine, KrumM: body.KrumM})
 		out := h.paymentConfig()
 		out["quoteId"] = q.ID
 		out["hive"] = q.HIVE
@@ -153,11 +187,18 @@ func (h *Hub) Handler(webDir string) http.Handler {
 
 	mux.HandleFunc("POST /task", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Task    string `json:"task"`
-			Request string `json:"request"`
-			HIVE    int    `json:"hive"`
-			QuoteID string `json:"quoteId"`
-			TxHash  string `json:"txHash"`
+			Task         string                `json:"task"`
+			Request      string                `json:"request"`
+			HIVE         int                   `json:"hive"`
+			QuoteID      string                `json:"quoteId"`
+			TxHash       string                `json:"txHash"`
+			Routing      string                `json:"routing"`
+			Aggregation  string                `json:"aggregation"`
+			Byzantine    int                   `json:"byzantine"`
+			KrumM        int                   `json:"krumM"`
+			Simulate     bool                  `json:"simulate"`
+			History      []deepworker.ChatTurn `json:"history"`
+			HistoryLimit int                   `json:"historyLimit"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
@@ -196,7 +237,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 				hive = paidAgents
 			}
 		}
-		result, err := h.RunPaid(ctx, text, hive, pay)
+		result, err := h.RunAlg(ctx, text, hive, pay, AlgConfig{Routing: body.Routing, Aggregation: body.Aggregation, Byzantine: body.Byzantine, KrumM: body.KrumM, Simulate: body.Simulate, History: h.trimHistoryLimit(body.History, body.HistoryLimit)})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 			return
@@ -205,6 +246,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 	})
 
 	mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
+		h.EnrichAllAgentIdentities(r.Context())
 		cards := h.Registry.Snapshot()
 		online := 0
 		for _, c := range cards {
@@ -216,6 +258,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 	})
 
 	mux.HandleFunc("GET /agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		h.EnrichAgentIdentity(r.Context(), r.PathValue("id"))
 		card, ok := h.Registry.Get(r.PathValue("id"))
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "unknown agent"})
@@ -267,7 +310,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 			"completedTasks": len(h.History()), "agentSuccess": totalSuccess, "agentFailure": totalFailure,
 			"avgAgentLatencyMs": avg,
 			"provider":          h.Agg.Provider(), "aggregatorModel": h.Agg.Model(),
-			"hive":        map[string]interface{}{"default": h.Cfg.HIVE.Default, "complex": h.Cfg.HIVE.Complex, "max": h.Cfg.HIVE.Max},
+			"hive":        map[string]interface{}{"default": h.Cfg.HIVE.Default, "complex": h.Cfg.HIVE.Complex, "max": h.Cfg.HIVE.Max, "maxAgents": h.MaxAgents()},
 			"payment":     h.paymentConfig(),
 			"coordinator": h.Cfg.CoordinatorURL,
 		})
@@ -291,6 +334,7 @@ func (h *Hub) Handler(webDir string) http.Handler {
 			}
 		})
 	}
+	h.registerExtraRoutes(mux)
 	return withCORS(mux)
 }
 
@@ -309,17 +353,24 @@ func (s *statusRecorder) WriteHeader(code int) {
 // treasury and the chain MetaMask has to be on.
 func (h *Hub) paymentConfig() map[string]interface{} {
 	return map[string]interface{}{
-		"paymentRequired":  h.Cfg.PaymentRequired,
-		"symbol":           hiveSymbol,
-		"pricePerAgent":    h.Cfg.PricePerAgent,
-		"pricePerAgentWei": h.priceWeiString(),
-		"token":            h.Cfg.TokenAddress,
-		"treasury":         h.Cfg.Treasury,
-		"chainId":          h.Cfg.ChainID,
-		"chainIdHex":       fmt.Sprintf("0x%x", h.Cfg.ChainID),
-		"network":          h.Cfg.Network,
-		"rpcUrl":           h.Cfg.RPCURL,
-		"faucet":           h.faucetEnabled(),
+		"paymentRequired":     h.Cfg.PaymentRequired,
+		"symbol":              hiveSymbol,
+		"pricePerAgent":       h.Cfg.PricePerAgent,
+		"pricePerAgentWei":    h.priceWeiString(),
+		"token":               h.Cfg.TokenAddress,
+		"treasury":            h.Cfg.Treasury,
+		"chainId":             h.Cfg.ChainID,
+		"chainIdHex":          fmt.Sprintf("0x%x", h.Cfg.ChainID),
+		"network":             h.Cfg.Network,
+		"rpcUrl":              h.Cfg.RPCURL,
+		"faucet":              h.faucetEnabled(),
+		"registrationFeeHive": h.Cfg.RegistrationFee,
+		"registrationFeeWei":  h.registrationFeeWeiString(),
+		"registry":            h.Cfg.RegistryAddress,
+		"historyLimit":        h.Cfg.HistoryLimit,
+		"hubFeePercent":       h.Cfg.HubFeePercent,
+		"maxAgents":           h.MaxAgents(),
+		"maxAgentsCeiling":    h.Cfg.HIVE.Max,
 	}
 }
 
@@ -331,6 +382,13 @@ func (h *Hub) priceWeiString() string {
 }
 
 // faucetEnabled is true only on the local ganache devnet.
+func (h *Hub) registrationFeeWeiString() string {
+	if h.Cfg.RegistrationFeeWei == nil {
+		return "0"
+	}
+	return h.Cfg.RegistrationFeeWei.String()
+}
+
 func (h *Hub) faucetEnabled() bool {
 	return strings.EqualFold(h.Cfg.Network, "ganache") && strings.TrimSpace(h.Cfg.CoordinatorURL) != ""
 }

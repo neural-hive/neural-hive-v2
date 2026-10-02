@@ -1,0 +1,1 @@
+    if(r.taskId){ h+=@QO@@LT@a href=@SQ@/execution.html?id=@SQ@@QO@+encodeURIComponent(r.taskId)+@QO@@SQ@ target=@SQ@_blank@SQ@ class=@SQ@btn@SQ@ style=@SQ@margin-top:8px@SQ@@GT@Open Execution Details@LT@/a@GT@@QO@; }

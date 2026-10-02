@@ -1,0 +1,1 @@
+const fs=require('fs');let d="";process.stdin.setEncoding('utf8');process.stdin.on('data',function(c){d=d.concat(c)});process.stdin.on('end',function(){fs.writeFileSync(process.argv[2],d);console.log('wrote '+process.argv[2]+' len='+d.length)}); 
