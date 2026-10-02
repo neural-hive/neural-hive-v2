@@ -1,0 +1,138 @@
+/* Neural Hive page scripts: agents list, agent detail, execution details, add agent. */
+(function(){
+  var N=window.NH; var page=document.body.getAttribute("data-page"); var walletState=N.wallet; var PAY=null;
+  function D(id){ return document.getElementById(id); }
+  function notice(msg,bad){ var n=D("notice"); if(!n){ return; } if(!msg){ n.className="nh-notice"; n.textContent=""; return; } n.className="nh-notice show"+(bad?" bad":""); n.textContent=msg; }
+  function chip(a){ return "<span class='nh-tag'>"+N.esc(a)+"</span>"; }
+  function tags(list){ if(!list||!list.length){ return "<span class='nh-tag mut'>none</span>"; } var h=""; for(var i=0;i<list.length;i++){ h+=chip(list[i]); } return h; }
+  function agentCard(a, detailed){
+    var h="<div class='nh-card'>";
+    h+="<div style='display:flex;gap:10px;align-items:center'><span class='dot '"+ (a.status==="online"?"ok":"bad") +"'></span><b>"+N.esc(a.name||a.id)+"</b> "+(a.status==="online"?"<span class='nh-tag ok'>live</span>":"<span class='nh-tag bad'>offline</span>")+"<span class='nh-spacer'></span><a class='btn' href='/agent.html?id='"+encodeURIComponent(a.id)+"' target='_blank'>Details</a></div>";
+    h+="<div style='margin-top:10px'>"+tags(a.tags)+"</div>";
+    h+="<div class='nh-kv' style='margin-top:10px'>";
+    h+=" <div class='k'>id</div><div class='v'>"+N.esc(a.id)+"</div>";
+    h+="<div class='k'>endpoint</div><div class='v'>"+N.esc(a.endpoint||"-")+"</div>";
+    h+="<div class='k'>price</div><div class='v'>"+(a.priceHive!=null?(N.esc(a.priceHive)+" HIVE/query"):"unset")+"</div>";
+    h+="<div class='k'>provider / model</div><div class='v'>"+N.esc(a.provider||"-")+" / "+N.esc(a.model||"-")+"</div>";
+    h+="<div class='k'>reputation / risk</div><div class='v'>"+N.fmt(a.reputation,3)+" / "+N.fmt(a.risk,3)+"</div>";
+    h+="<div class='k'>executions</div><div class='v'>"+N.esc(a.executions)+" (ok "+N.esc(a.success)+" / fail "+N.esc(a.failure)+")</div>";
+    h+="<div class='k'>avg latency</div><div class='v'>"+(a.avgLatencyMs==null?"-":(a.avgLatencyMs+" ms"))+"</div>";
+    if(detailed && a.lastError){ h+="<div class='k'>last error</div><div class='v'>"+N.esc(a.lastError)+"</div>"; }
+    h+="</div></div>";
+    return h;
+  }
+
+  function pageAgents(){
+    N.get("/agents").then(function(d){ var list=d.agents||[];
+      D("count").textContent=list.length+" agents ("+(d.online||0)+" online)";
+      var h=""; for(var i=0;i<list.length;i++){ h+=agentCard(list[i],true); }
+      D("agentGrid").innerHTML=h || "<div class='nh-muted'>No agents registered.</div>";
+    }).catch(function(e){ notice(N.errText(e),true); });
+  }
+  function pageAgent(){
+    var id=N.qs("id"); if(!id){ notice("No agent id supplied.",true); return; }
+    N.get("/agents/"+encodeURIComponent(id)).then(function(a){ if(a.error){ throw new Error(a.error); }
+      D("agentBox").innerHTML=agentCard(a,true);
+      D("priceInput").value=(a.priceHive!=null?a.priceHive:"");
+      D("agentIdLabel").textContent=a.id;
+      D("priceBtn").onclick=function(){ setPrice(a.id); };
+    }).catch(function(e){ notice(N.errText(e),true); });
+  }
+  function setPrice(id){
+    var v=parseFloat(D("priceInput").value); if(isNaN(v)<0){ notice("Enter a non-negative price in HIVE.",true); return; }
+    notice("");
+    N.connect().then(function(){ return N.post("/agents/"+encodeURIComponent(id)+"/price", { priceHive:v }); }).then(function(d){
+      if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); }
+      notice("Price updated to "+v+" HIVE. Record it on-chain from the owner wallet with updatePrice(uint256).",false);
+      D("onchainBox").textContent=JSON.stringify((d.onchain||{}),null,2);
+      pageAgent();
+    }).catch(function(e){ notice(N.errText(e),true); });
+  }
+
+  function pageExecution(){
+    var id=N.qs("id"); if(!id){ notice("No execution id supplied.",true); return; }
+    var res=null; var events=[];
+    Promise.all([ N.get("/trace/"+encodeURIComponent(id)), N.get("/events/"+encodeURIComponent(id)) ]).then(function(rr){
+      res=rr[0]; events=(rr[1]||{}).events||[];
+      if(res.error){ throw new Error(res.error); }
+      D("title").textContent=res.task||"Execution details";
+      D("sub").textContent=res.taskId;
+      renderExec(res,events);
+    }).catch(function(e){ notice(N.errText(e),true); });
+  }
+  function glyph(e){ var k=e.kind||""; if(k.indexOf("response-byzantine")===0||k.indexOf("failed")>=0){ return "x"; } if(k==="final"||k==="anchor"||k==="aggregated"){ return "+"; } return "."; }
+  function renderExec(res,events){
+    var a=res.algorithms||{}; var c=res.cost||{};
+    var h="";
+    h+="<div class='nh-card'><div class='nh-h2'>How the Hub decomposed the query</div>";
+    h+="<div class='nh-muted'>"+N.esc(res.task)+"</div>";
+    h+="<div class='nh-kv' style='margin-top:10px'>";
+    h+=kv("task id",res.taskId)+kv("complexity",(res.complexity||{}).level)+kv("signals",((res.complexity||{}).signals||[]).join("; "))+kv("subtasks",String((res.subtasks||[]).length))+kv("routing",a.routeModeUsed||a.routing)+kv("aggregation",a.aggregation)+kv("byzantine nodes",String(a.byzantine)+" of "+a.committee+" (f-max "+a.faultTolerance+")")+kv("expected cost",(c.totalHive||"-")+" HIVE");
+    h+="</div><div>";
+    h+="<div class='nh-card'><div class='nh-h2'>Routing graph</div>";
+    h+="<div class='nh-graph'>";
+    h+="<div class='nh-node' style='border-color:rgba(168,85,247,.5)'><b>USER REQUEST</b> <br>"+N.esc(res.task)+"</div>";
+    h+="<div class='nh-arrow'>|</div>";
+    h+="<div class='nh-node' style='border-color:rgba(168,85,247,.5)'><b>HUB</b> decompose -> price -> route ("+N.esc(a.routeModeUsed||a.routing)+") -> dispatch -> aggregate ("+N.esc(a.aggregation)+")</div>";
+    var sels=res.selections||[]; var subs=res.subtasks||[];
+    for(var i=0;i<sels.length;i++){ var s=sels[i]; var sub=findSub(subs,s.subtaskId);
+      h+="<div class='nh-arrow'>|</div>";
+      h+="<div class='nh-node'><b>"+N.esc(s.subtaskId)+"</b> req tags: "+escTags(s.requiredTags)+" <br>"+N.esc(sub?sub.description:"")+"<br>-> agent <b>"+N.esc(s.agentId)+"</b> ("+N.esc(s.priceHive)+" HIVE)</div>";
+    }
+    h+="<div class='nh-arrow'>|</div>";
+    h+="<div class='nh-node' style='border-color:rgba(52,211,153,.5)'><b>FINAL RESPONSE</b></div>";
+    h+="</div></div>";
+    var results=res.agentResults||[];
+    h+="<div class='nh-card'><div class='nh-h2'>Agent replies</div>";
+    for(var j=0;j<results.length;j++){ var r=results[j];
+      h+="<div class='nh-node'><b>"+N.esc(r.agentName||r.agentId)+"</b> "+(r.byzantine?"<span class='nh-tag bad'>byzantine</span>":"<span class='nh-tag ok'>"+N.esc(r.status)+"</span>")+" :"+r.port+" "+N.esc(r.model||"")+" "+(r.latencyMs||0)+" ms hash "+N.esc((r.hash||"").slice(0,14))+"<div class='nh-muted' style='margin-top:6px;white-space:pre-wrap'>"+N.esc((r.answer||"").slice(0,1200))+"</div></div>";
+    }
+    h+="</div>";
+    h+="<div class='nh-card'><div class='nh-h2'>Aggregation</div>";
+    var ag=res.aggregation||{};
+    h+="<div class='nh-kv'>"+kv("rule",a.aggregation)+kv("committee kept",String(ag.inputs))+kv("krum outliers filtered",String(a.krumOutliers||0))+kv("model",(ag.model||"-")+" / "+(ag.provider||"-"))+kv("status",ag.ok?"ok":("failed: "+(ag.error||"-")))+"</div>";
+    h+="<div class='nh-prose' style='margin-top:12px'>"+N.md(res.answer||"")+"</div></div>";
+    var an=res.anchor||{};
+    h+="<div class='nh-card'><div class='nh-h2'>On-chain evidence</div>";
+    h+="<div class='nh-kv'>"+kv("answer hash",res.answerHash)+kv("anchored",an.ok?"yes":"no")+kv("request tx",an.requestTx||"-")+kv("settlement tx",an.settleTx||"-")+kv("network",an.network||"-")+"</div></div>";
+    if(res.payment){ var p=res.payment; h+="<div class='nh-card'><div class='nh-h2'>HIVE payment</div>"+"<div class='nh-kv'>"+kv("mode",p.mode)+kv("paid",(p.paidHive||"0")+" HIVE")+kv("payer",p.payer||"-")+kv("treasury",p.treasury||"-")+kv("tx",p.txHash||"-")+"</div></div>"; }
+    var evs=events||[]; h+="<div class='nh-card'><div class='nh-h2'>Live execution activity</div>";
+    for(var k=0;k<evs.length;k++){ var e=evs[k]; h+="<div class='nh-ev-row'><div class='nh-ev-ico'>"+glyph(e)+"</div><div><div class='nh-ev-lab'>"+N.esc(e.label)+"</div><div class='nh-ev-det'>"+N.esc(e.detail||"")+"</div></div><div class='nh-ev-t'>"+N.esc(String(e.at||"").slice(11,19))+"</div></div>"; }
+    h+="</div>";
+    D("exec").innerHTML=h;
+  }
+  function kv(k,v){ return "<div class='k'>"+N.esc(k)+"</div><div class='v'>"+N.esc(v==null?"-":v)+"</div>"; }
+  function escTags(list){ if(!list||!list.length){ return "none"; } return N.esc(list.join(", ")); }
+  function findSub(subs,id){ for(var i=0;i<subs.length;i++){ if(subs[i].id===id){ return subs[i]; } } return null; }
+
+  function pageAddAgent(){
+    D("submit").onclick=registerAgent;
+    D("ownerBtn").onclick=connectOwner;
+    N.loadPay().then(function(c){ PAY=c; D("chainInfo").textContent="chain "+c.chainId+" "+c.rpcUrl; });
+    if(N.eth()){ N.rpc("eth_accounts").then(function(a){ if(a&&a.length){ walletState.account=a[0]; showOwner(); } }).catch(function(){}); }
+  }
+  function connectOwner(){ notice(""); N.connect().then(function(){ showOwner(); notice("Owner wallet connected.",false); }).catch(function(e){ notice(N.errText(e),true); }); }
+  function showOwner(){ D("ownerBtn").textContent=N.shortAddr(walletState.account); }
+  function registerAgent(){
+    notifyClear();
+    var name=D("name").value.trim(); var endpoint=D("endpoint").value.trim(); var price=parseFloat(D("price").value||"0"); var tags=D("tags").value.split(",").map(function(s){ return s.trim().toLowerCase(); }).filter(function(s){ return s; });
+    var type=D("type").value;
+    if(!name||!endpoint){ notice("Name and endpoint are required.",true); return; }
+    notice("Verifying the agent by sending a live probe to "+endpoint+" ...",false);
+    N.post("/agents/register", { name:name, endpoint:endpoint, priceHive:isNaN(price)?0:price, tags:tags, type:type, owner:(walletState.account||""), signer:(walletState.account||"") }).then(function(d){
+      if(!d.__ok||d.error){ throw new Error(d.error||("HTTP "+d.__status)); }
+      D("result").innerHTML="<div class='nh-card'><b>Status: "+N.esc(d.status)+"</b><br>"+N.esc(d.detail||"")+"<br>Agent id <code>"+N.esc(d.id)+"</code></div>";
+      D("calldataBox").textContent=JSON.stringify((d.onchain||{}),null,2);
+      if(d.ok){ notice("Agent "+name+" is LIVE and registered. To make it fully on-chain, send the registerAgent transaction from MetaMask (calldata below).",false); } else { notice("The agent did not pass the liveness probe. It is registered as offline: "+(d.detail||""),true); }
+    }).catch(function(e){ notice(N.errText(e),true); });
+  }
+  function notifyClear(){ notice(""); D("result").innerHTML=""; }
+  function init(){
+    if(page==="agents"){ pageAgents(); }
+    else if(page==="agent"){ pageAgent(); }
+    else if(page==="execution"){ pageExecution(); }
+    else if(page==="add-agent"){ pageAddAgent(); }
+    if(D("walletBtn")){ D("walletBtn").onclick=connectOwner; }
+  }
+  if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
+})();

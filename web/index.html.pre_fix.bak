@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<meta name='viewport' content='width=device-width, initial-scale=1' />
+<title>Neural Hive - Decentralized Internet of AI</title>
+<link rel='stylesheet' href='/theme.css' />
+<style>
+.nh-shell{display:grid;grid-template-columns:262px 1fr 320px;gap:0;min-height:calc(100vh - 59px)}
+@media (max-width:1180px){.nh-shell{grid-template-columns:262px 1fr}}
+@media (max-width:860px){.nh-shell{grid-template-columns:1fr}.nh-side,.nh-aside{display:none}}
+.nh-side{border-right:1px solid var(--line2);background:linear-gradient(180deg,rgba(8,12,24,.6),rgba(8,12,24,.25));padding:14px 12px;display:flex;flex-direction:column;gap:10px;position:sticky;top:59px;height:calc(100vh - 59px);overflow:auto}
+.nh-side h3{margin:0;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.nh-newbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-radius:11px;border:1px solid rgba(124,92,255,.5);background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.22));color:var(--ink);font:inherit;font-weight:700;font-size:13px;cursor:pointer}
+.nh-newbtn:hover{box-shadow:0 0 16px rgba(124,92,255,.3)}
+.nh-threads{display:flex;flex-direction:column;gap:4px}
+.nh-thread{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;border:1px solid transparent;cursor:pointer;font-size:13px;color:var(--muted)}
+.nh-thread:hover{border-color:var(--line);background:rgba(122,142,205,.06)}
+.nh-thread.active{border-color:rgba(124,92,255,.6);background:rgba(124,92,255,.12);color:var(--ink)}
+.nh-thread .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nh-thread .x{opacity:.45;font-size:14px;line-height:1}
+.nh-thread .x:hover{opacity:1;color:var(--bad)}
+.nh-main{min-width:0}
+.nh-aside{border-left:1px solid var(--line2);background:linear-gradient(180deg,rgba(8,12,24,.55),rgba(8,12,24,.2));padding:16px 14px 40px;position:sticky;top:59px;height:calc(100vh - 59px);overflow:auto}
+.nh-aside .nh-select,.nh-aside .nh-input{width:100%}
+.chat-wrap{max-width:860px;margin:0 auto;padding:18px 22px 30px}
+.thread{display:flex;flex-direction:column;gap:22px;min-height:56vh}
+.bubble-user{align-self:flex-end;max-width:82%;padding:12px 15px;border-radius:14px;background:linear-gradient(135deg,rgba(91,124,250,.24),rgba(168,85,247,.16));border:1px solid rgba(122,142,205,.26);font-size:14.3px;line-height:1.5;white-space:pre-wrap}
+.answer{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:0 14px 40px rgba(0,0,0,.32)}
+.composer{position:sticky;bottom:0;background:linear-gradient(180deg,rgba(7,10,20,0),rgba(7,10,20,.92) 40%);padding:12px 0 6px}
+.composer-box{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:12px 14px;backdrop-filter:blur(12px)}
+textarea{width:100%;background:transparent;border:none;outline:none;color:var(--ink);font:inherit;font-size:14.4px;resize:none;min-height:26px;max-height:170px}
+.row{display:flex;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
+.side-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:14px}
+.side-card h3{margin:0 0 10px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.agent-mini{display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid var(--line2);font-size:12.4px}
+.agent-mini:last-child{border-bottom:none}.agent-mini .n{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}.dot.ok{background:var(--ok);box-shadow:0 0 9px var(--ok)}.dot.bad{background:var(--bad)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);font:inherit;font-size:12.2px;font-weight:600;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:rgba(124,92,255,.6)}.btn.send{background:var(--grad);color:#080c18;border:none;padding:9px 20px;font-weight:700}.btn.ghost{background:transparent}.btn.full{width:100%;justify-content:center}
+.empty{padding:60px 10px;text-align:center;color:var(--muted)}
+.empty .big{font-size:22px;color:var(--ink);margin-bottom:8px}
+</style>
+</head>
+
+<body>
+<header class='nh-top'>
+  <a class='nh-brand' href='/'><div class='nh-logo'></div><div><h1>Neural Hive</h1><div class='sub'>Decentralized Internet of AI</div></div></a>
+  <div class='nh-spacer'></div>
+  <div class='nh-muted' id='faucetBox' style='display:flex;gap:8px;align-items:center'>
+    <button class='nh-btn' id='faucetBtn' title='Get test HIVE on the devnet'>Faucet</button>
+  </div>
+  <a class='nh-btn' href='/agents.html'>Agents</a>
+  <a class='nh-btn primary' href='/add-agent.html'>+ Add Agent</a>
+  <button class='nh-btn wallet' id='walletBtn'>Connect MetaMask</button>
+</header>
+<div class='nh-notice' id='notice' style='margin:12px 22px 0'></div>
+<div class='nh-shell'>
+  <aside class='nh-side'>
+    <button class='nh-newbtn' id='newChat'>+ New chat</button>
+    <h3>Conversations</h3>
+    <div class='nh-threads' id='threadList'></div>
+    <div class='nh-spacer'></div>
+    <a class='btn full' href='/agents.html'>All agents</a>
+    <a class='btn full' href='/add-agent.html'>+ Add agent</a>
+  </aside>
+  <main class='nh-main'>
+    <div class='chat-wrap'>
+      <div class='thread' id='thread'></div>
+      <div class='composer'>
+        <div class='composer-box'>
+          <textarea id='input' rows='1' placeholder='Ask Neural Hive...'></textarea>
+          <div class='row'>
+            <span class='nh-muted' id='costHint'>Loading price...</span>
+            <div style='flex:1'></div>
+            <label class='nh-muted' for='historyLimit' title='How many prior messages are sent to the agents so they remember the conversation'>Remember</label>
+            <select class='nh-select' id='historyLimit' title='How many prior messages are sent to the agents so they remember the conversation'>
+              <option value='5'>Last 5 messages</option>
+              <option value='10'>Last 10 messages</option>
+              <option value='20'>Last 20 messages</option>
+              <option value='-1'>Entire conversation</option>
+            </select>
+            <button class='btn' id='estimateBtn'>Estimate cost</button>
+            <button class='btn send' id='send'>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <aside class='nh-aside'>
+    <div class='side-card'>
+      <h3>Agent pool</h3>
+      <div id='agentList'><div class='nh-muted'>loading...</div></div>
+      <a class='btn full' href='/agents.html' style='margin-top:10px'>See all agents</a>
+    </div>
+    <div class='side-card'>
+      <h3>Routing &amp; aggregation</h3>
+      <label class='nh-label'>Routing</label>
+      <select class='nh-select' id='routing'><option value='selfish'>Selfish routing (4.2.2)</option><option value='linucb'>LinUCB bandit (4.2.3)</option></select>
+      <div style='height:8px'></div>
+      <label class='nh-label'>Aggregation</label>
+      <select class='nh-select' id='aggregation'><option value='mean'>Mean</option><option value='majority'>Majority vote</option><option value='krum'>Krum (4.2.5)</option><option value='multi-krum'>Multi-Krum</option></select>
+      <div style='height:8px'></div>
+      <label class='nh-label'>Byzantine nodes</label>
+      <input class='nh-input' id='byzantine' type='number' min='0' max='5' value='0' />
+    </div>
+    <div class='side-card'>
+      <h3>Network</h3>
+      <div class='nh-muted' id='net'>connecting...</div>
+    </div>
+  </aside>
+</div>
+<script src='/app.js'></script>
+<script src='/chat.js'></script>
+</body>
+</html>
+

@@ -44,16 +44,45 @@ type Hub struct {
 	client    *http.Client
 	UILog     *log.Logger
 	Pay       *Payments
+	Events    *eventBus
+	bandit    *bandit
+	Wallets   *WalletBook
+	// WalletFactory deploys and tracks the per-agent AgentWallet smart contracts.
+	WalletFactory *AgentWalletBook
+	cfg           *config.Config
+	chainMu       sync.Mutex
+	onchain       *OnChain
 
 	mu      sync.Mutex
 	history []*Result
+
+	regMu       sync.Mutex
+	pendingRegs map[string]*pendingRegistration
+
+	// maxAgentsMu guards maxAgents, the runtime cap on how many agents one task may be sent to.
+	// It starts at the configured HIVE_MAX ceiling and can be lowered from the UI, but never raised above HIVE_MAX. decideHIVE clamps every routing decision to this value.
+	maxAgentsMu sync.Mutex
+	maxAgents   int
+}
+
+type pendingRegistration struct {
+	Card   AgentCard
+	Detail string
+	At     time.Time
 }
 
 // New builds a Hub over the resolved configuration, the agent registry and the shared DeepSeek
 // provider used for the aggregation step.
 func New(cfg *config.Config, reg *Registry) *Hub {
 	provider := deepseek.NewClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Timeout, nil)
-	return NewWithProvider(cfg.Hub, reg, provider, cfg.DeepSeek.Timeout)
+	h := NewWithProvider(cfg.Hub, reg, provider, cfg.DeepSeek.Timeout)
+	h.cfg = cfg
+	if owner := h.OwnerAddress(); owner != "" {
+		for _, card := range reg.Snapshot() {
+			reg.SetOwner(card.ID, owner)
+		}
+	}
+	return h
 }
 
 // NewWithProvider builds a Hub over an explicit provider; tests inject a fake provider here so the
@@ -69,14 +98,20 @@ func NewWithProvider(cfg config.Hub, reg *Registry, provider llm.Provider, agent
 		Temperature: 0.3,
 	})
 	return &Hub{
-		Cfg:       cfg,
-		Registry:  reg,
-		Provider:  provider,
-		Agg:       agg,
-		AgentTime: agentTimeout,
-		client:    &http.Client{Timeout: agentTimeout + 10*time.Second},
-		history:   []*Result{},
-		Pay:       newPayments(cfg),
+		Cfg:           cfg,
+		Registry:      reg,
+		Provider:      provider,
+		Agg:           agg,
+		AgentTime:     agentTimeout,
+		client:        &http.Client{Timeout: agentTimeout + 10*time.Second},
+		history:       []*Result{},
+		Pay:           newPayments(cfg),
+		Events:        newEventBus(),
+		bandit:        newBandit(4),
+		Wallets:       newWalletBook(),
+		WalletFactory: newAgentWalletBook(cfg.WalletFactoryAddress, cfg.TokenAddress),
+		pendingRegs:   map[string]*pendingRegistration{},
+		maxAgents:     cfg.HIVE.Max,
 	}
 }
 
@@ -192,12 +227,12 @@ func buildSubtaskPrompt(sub Subtask) string {
 }
 
 // executeAgent dispatches one subtask to one agent instance and records the outcome on the agent.
-func (h *Hub) executeAgent(ctx context.Context, taskID string, sub Subtask, card AgentCard) AgentResult {
+func (h *Hub) executeAgent(ctx context.Context, taskID string, sub Subtask, card AgentCard, history []deepworker.ChatTurn) AgentResult {
 	r := AgentResult{
 		SubtaskID: sub.ID, AgentID: card.ID, Port: card.Port, Tags: append([]string{}, card.Tags...),
 		Endpoint: card.Endpoint, Model: card.Model, Provider: card.Provider,
 	}
-	req := deepworker.TaskRequest{SubTaskID: sub.ID, TaskID: taskID, Prompt: buildSubtaskPrompt(sub), Require: sub.Tags}
+	req := deepworker.TaskRequest{SubTaskID: sub.ID, TaskID: taskID, Prompt: buildSubtaskPrompt(sub), Require: sub.Tags, History: history}
 	body, _ := json.Marshal(req)
 	tctx, cancel := context.WithTimeout(ctx, h.AgentTime)
 	defer cancel()
@@ -278,8 +313,9 @@ func (h *Hub) decideHIVE(cx Complexity, objectives []string, override int) int {
 	if override > 0 {
 		hive = override
 	}
-	if hive > h.Cfg.HIVE.Max {
-		hive = h.Cfg.HIVE.Max
+	// Hard ceiling: the configured HIVE_MAX, further reduced by the runtime cap the UI sets.
+	if cap := h.MaxAgents(); hive > cap {
+		hive = cap
 	}
 	if online := h.Registry.OnlineCount(); online > 0 && hive > online {
 		hive = online
@@ -288,6 +324,40 @@ func (h *Hub) decideHIVE(cx Complexity, objectives []string, override int) int {
 		hive = 1
 	}
 	return hive
+}
+
+// MaxAgents returns the runtime cap on how many agents one task may be routed to. It never
+// exceeds the configured HIVE_MAX ceiling and is always at least 1.
+func (h *Hub) MaxAgents() int {
+	h.maxAgentsMu.Lock()
+	defer h.maxAgentsMu.Unlock()
+	if h.maxAgents < 1 {
+		if h.Cfg.HIVE.Max < 1 {
+			return 1
+		}
+		return h.Cfg.HIVE.Max
+	}
+	return h.maxAgents
+}
+
+// SetMaxAgents sets the runtime cap on how many agents one task may be routed to. The value is
+// clamped to [1, HIVE_MAX] so the UI control can never raise the cap above the configured
+// ceiling; it returns the value actually stored.
+func (h *Hub) SetMaxAgents(n int) int {
+	h.maxAgentsMu.Lock()
+	defer h.maxAgentsMu.Unlock()
+	max := h.Cfg.HIVE.Max
+	if max < 1 {
+		max = 1
+	}
+	if n < 1 {
+		n = 1
+	}
+	if n > max {
+		n = max
+	}
+	h.maxAgents = n
+	return n
 }
 
 func trace(res *Result, stage, detail string, data map[string]interface{}) {
@@ -395,7 +465,7 @@ func (h *Hub) RunPaid(ctx context.Context, text string, hiveOverride int, pay *P
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i] = h.executeAgent(ctx, res.TaskID, slots[i].sub, slots[i].card)
+			results[i] = h.executeAgent(ctx, res.TaskID, slots[i].sub, slots[i].card, nil)
 		}(i)
 	}
 	wg.Wait()
@@ -476,6 +546,22 @@ func (h *Hub) aggregate(ctx context.Context, task string, results []AgentResult)
 	}
 	agg.OK = true
 	return res.Text, agg
+}
+
+func buildAggregationMessages(task string, history []deepworker.ChatTurn, good []AgentResult) []llm.Message {
+	msgs := make([]llm.Message, 0, len(history)+2)
+	for _, h := range history {
+		role := h.Role
+		if role != llm.RoleUser && role != llm.RoleAssistant && role != llm.RoleSystem {
+			continue
+		}
+		if strings.TrimSpace(h.Content) == "" {
+			continue
+		}
+		msgs = append(msgs, llm.Message{Role: role, Content: h.Content})
+	}
+	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: buildAggregationPrompt(task, good)})
+	return msgs
 }
 
 func buildAggregationPrompt(task string, good []AgentResult) string {

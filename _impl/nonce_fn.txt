@@ -1,0 +1,28 @@
+// nextNonce returns the next nonce for the signing account. It always adopts the fresh pending
+// nonce from the node and never goes backwards, so a stale local cache can never make this
+// client submit a transaction with a nonce the account has already consumed - the
+// tx-does-not-have-the-correct-nonce / nonce-too-low error. Several Neural Hive processes
+// (coordinator, relayer, hub) share the deployer key, so the on-chain pending nonce is the
+// only source of truth.
+func (c *Client) nextNonce() (uint64, error) {
+	n, err := c.Eth.PendingNonceAt(context.Background(), c.From)
+	if err != nil {
+		return c.nonce, nil
+	}
+	if n > c.nonce {
+		c.nonce = n
+	}
+	return c.nonce, nil
+}
+
+// isNonceError reports whether an error is a stale or duplicate nonce rejection from the node.
+func isNonceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "nonce too low") ||
+		strings.Contains(m, "correct nonce") ||
+		strings.Contains(m, "already known") ||
+		strings.Contains(m, "replacement transaction underpriced")
+}

@@ -1,0 +1,50 @@
+// Neural Hive shared frontend library (API, markdown, formatting, wallet, event stream).
+window.NH = (function () {
+  var API = (location.port === "9500") ? "" : "http://127.0.0.1:9500";
+  var ZERO = BigInt(0), UNIT = BigInt("1000000000000000000");
+  function esc(s){ var A=String.fromCharCode(38); var t=(s==null)?"":String(s); return t.split(A).join(A+"amp;").replace(/</g,A+"lt;").replace(/>/g,A+"gt;"); }
+  function qs(name){ var m=new RegExp("[?&]"+name+"=([^&]*)").exec(location.search); return m?decodeURIComponent(m[1].replace(/\+/g," ")):null; }
+  function fmt(x,n){ if(typeof x!=="number"){ return (x==null||x==="")?"-":x; } return x.toFixed(n==null?4:n); }
+  function shortId(x){ if(!x||typeof x!=="string"){ return "-"; } return esc(x.length<=30?x:x.slice(0,16)+"..."+x.slice(-12)); }
+  function shortAddr(a){ return (a&&a.length>12)?a.slice(0,6)+"..."+a.slice(-4):(a||""); }
+  function hiveStr(wei){ var b=BigInt(wei); var w=b/UNIT; var r=b%UNIT; if(r===ZERO){ return w.toString(); } var f=r.toString(); while(f.length<18){ f="0"+f; } f=f.replace(/0+$/,""); if(f.length>4){ f=f.slice(0,4).replace(/0+$/,""); } if(!f&&w===ZERO){ return "<0.0001"; } return w.toString()+(f?"."+f:""); }
+  function inline(t){ var s=esc(t); s=s.replace(/`([^`]+)`/g,"<code>$1</code>"); s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>"); s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,"<a href=\"$2\" target=\"_blank\" rel=\"noopener\">$1</a>"); return s; }
+  function json(res){ return res.text().then(function(t){ var d={}; try{ d=t?JSON.parse(t):{}; }catch(e){ d={error:t}; } d.__status=res.status; d.__ok=res.ok; return d; }); }
+  function post(path, body){ return fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})}).then(json); }
+  function get(path){ return fetch(API+path).then(json); }
+  function md(text){
+    var src=(text==null)?"":String(text); var NL=String.fromCharCode(10); var lines=src.replace(/\r\n/g, NL).split(NL); var out=[]; var i=0;
+    function isB(l){return /^\s*[-*]\s+/.test(l);} function isN(l){return /^\s*\d+\.\s+/.test(l);} function isH(l){return /^#{1,6}\s+/.test(l);} function isF(l){return /^```/.test(l);} function isR(l){return /^\s*(-{3,}|\*{3,})\s*$/.test(l);}
+    while(i<lines.length){
+      var ln=lines[i];
+      if(isF(ln)){ i++; var buf=[]; while(i<lines.length&&!isF(lines[i])){ buf.push(lines[i]); i++; } i++; out.push("<pre><code>"+esc(buf.join(NL))+"</code></pre>"); continue; }
+      var m=ln.match(/^(#{1,6})\s+(.*)$/); if(m){ var lv=Math.min(m[1].length,6); out.push("<h"+lv+">"+inline(m[2])+"</h"+lv+">"); i++; continue; }
+      if(isR(ln)){ out.push("<hr>"); i++; continue; }
+      if(/^>\s?/.test(ln)){ var q=[]; while(i<lines.length&&/^>\s?/.test(lines[i])){ q.push(lines[i].replace(/^>\s?/,"")); i++; } out.push("<blockquote>"+inline(q.join("<br>"))+"</blockquote>"); continue; }
+      if(isB(ln)){ var li=[]; while(i<lines.length&&isB(lines[i])){ li.push("<li>"+inline(lines[i].replace(/^\s*[-*]\s+/,""))+"</li>"); i++; } out.push("<ul>"+li.join("")+"</ul>"); continue; }
+      if(isN(ln)){ var lo=[]; while(i<lines.length&&isN(lines[i])){ lo.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+lo.join("")+"</ol>"); continue; }
+      if(ln.trim()===""){ i++; continue; }
+      var para=[]; while(i<lines.length&&lines[i].trim()!==""&&!isH(lines[i])&&!isF(lines[i])&&!isB(lines[i])&&!isN(lines[i])&&!isR(lines[i])&&!/^>\s?/.test(lines[i])){ para.push(lines[i]); i++; }
+      out.push("<p>"+inline(para.join("<br>"))+"</p>");
+    }
+    return out.join("");
+  }
+
+  // ---- wallet ----
+  var walletState = { account:null, hiveWei:null, ethWei:null };
+  var PAY = null;
+  function eth(){ return window.ethereum || null; }
+  function rpc(method, params){ return eth().request({ method: method, params: params || [] }); }
+  function pad32(hex){ var h=String(hex).replace(/^0x/,"").toLowerCase(); while(h.length<64){ h="0"+h; } return h; }
+  function encTransfer(to, amountWei){ return "0xa9059cbb"+pad32(to)+pad32(BigInt(amountWei).toString(16)); }
+  function encBalanceOf(addr){ return "0x70a08231"+pad32(addr); }
+  function loadPay(){ return get("/payment/config").then(function(c){ PAY=c; return c; }); }
+  function ensureChain(){ if(!PAY){ throw new Error("payment config not loaded"); } var want=PAY.chainIdHex; return rpc("eth_chainId").then(function(cur){ if(String(cur).toLowerCase()===String(want).toLowerCase()){ return; } return rpc("wallet_switchEthereumChain",[{chainId:want}]).catch(function(e){ var missing=e&&(e.code===4902||/unrecognized chain|not been added/i.test(e.message||"")); if(!missing){ throw e; } return rpc("wallet_addEthereumChain",[{chainId:want,chainName:"Neural Hive Devnet",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},rpcUrls:[PAY.rpcUrl]}]); }); }); }
+  function refreshBalance(){ if(!walletState.account||!PAY||!PAY.token){ return Promise.resolve(); } return rpc("eth_call",[{to:PAY.token,data:encBalanceOf(walletState.account)},"latest"]).then(function(hex){ walletState.hiveWei=BigInt(hex&&hex!=="0x"?hex:"0x0"); return rpc("eth_getBalance",[walletState.account,"latest"]); }).then(function(hex){ walletState.ethWei=BigInt(hex); return walletState; }); }
+  function connect(){ if(!eth()){ return Promise.reject(new Error("MetaMask not found. Install the extension from https://metamask.io")); } return loadPay().then(function(){ return rpc("eth_requestAccounts"); }).then(function(accs){ if(!accs||!accs.length){ throw new Error("No MetaMask account selected."); } walletState.account=accs[0]; return ensureChain(); }).then(function(){ return refreshBalance(); }); }
+  function waitReceipt(hash){ var t0=Date.now(); function poll(){ return rpc("eth_getTransactionReceipt",[hash]).then(function(rc){ if(rc){ if(rc.status==="0x0"){ throw new Error("transaction reverted on chain"); } return rc; } if(Date.now()-t0>120000){ throw new Error("transaction not confirmed within 2 minutes"); } return new Promise(function(res){ setTimeout(res,1200); }).then(poll); }); } return poll(); }
+  function faucet(address){ return post("/faucet",{address:address}); }
+  function transferHive(to, costWei){ return rpc("eth_sendTransaction",[{from:walletState.account,to:PAY.token,value:"0x0",data:encTransfer(to,costWei)}]).then(function(hash){ return waitReceipt(hash).then(function(){ return hash; }); }); }
+  function errText(e){ if(!e){ return "Unknown error"; } if(e.code===4001){ return "You rejected the request in MetaMask."; } if(e.code===-32002){ return "A MetaMask request is already open. Finish it and retry."; } return e.message?e.message:String(e); }
+  return { API:API, esc:esc, qs:qs, fmt:fmt, shortId:shortId, shortAddr:shortAddr, hiveStr:hiveStr, inline:inline, md:md, post:post, get:get, wallet:walletState, loadPay:loadPay, connect:connect, ensureChain:ensureChain, refreshBalance:refreshBalance, transferHive:transferHive, faucet:faucet, errText:errText, pay:function(){ return PAY; }, eth:eth, rpc:rpc };
+})();

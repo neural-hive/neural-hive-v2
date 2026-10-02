@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
+<meta charset="utf-8" /> <link rel='icon' type='image/svg+xml' href='/logo.svg' /><link rel='apple-touch-icon' href='/logo.svg' />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Neural Hive - Agentic AI Workspace</title>
+<title>Neural Hive, Decentralized Internet of AI - Neural Hive, Decentralized Internet of AI</title>
 <style>
 :root{
   --bg:#070a14;--bg2:#0a0f1e;
@@ -301,11 +301,11 @@ function answerHTML(r){
 
 function exchangeHTML(ex){
   var h = `<div class='msg'><div class='label'><span class='who'>You</span></div><div class='user-bubble'>` + esc(ex.q) + `</div></div>`;
-  h += `<div class='msg'><div class='label'><span class='who'>DeepSeek Agent</span></div>`;
+  h += `<div class='msg'><div class='label'><span class='who'>Hive Agent</span></div>`;
   if (ex.status === `running`) {
     h += `<div class='answer-card'><div class='working'><span class='spinner'></span><span>Neural Hive is routing the request and generating an answer<span class='pulse'><i></i><i></i><i></i></span></span><span class='elapsed' data-elapsed='` + ex.id + `'>0.0s</span></div></div>`;
   } else if (ex.status === `error`) {
-    h += `<div class='errbox'><div class='ttl'>DeepSeek request failed</div>` + esc(ex.error) + `<div class='net-meta'>No answer was fabricated. Neural Hive surfaces the real provider error instead of falling back to a mock response.</div></div>`;
+    h += `<div class='errbox'><div class='ttl'>Agent request failed</div>` + esc(ex.error) + `<div class='net-meta'>No answer was fabricated. Neural Hive surfaces the real provider error instead of falling back to a mock response.</div></div>`;
   } else if (ex.result) {
     h += answerHTML(ex.result);
   }
@@ -316,7 +316,7 @@ function exchangeHTML(ex){
 function emptyState(){
   var chips = ``;
   for (var i = 0; i < SUGGESTIONS.length; i++) { chips += `<span class='chip' data-chip='` + i + `'>` + esc(SUGGESTIONS[i]) + `</span>`; }
-  return `<div class='empty'><div class='glyph'></div><h2>Ask Neural Hive anything</h2><p>Your request is decomposed, routed to the right agents and answered by the DeepSeek agent, with the execution hash recorded on-chain as evidence.</p><div class='chips'>` + chips + `</div></div>`;
+  return `<div class='empty'><div class='glyph'></div><h2>Ask Neural Hive anything</h2><p>Your request is decomposed, routed to the right agents and answered by the specialised agents, with the execution hash recorded on-chain as evidence.</p><div class='chips'>` + chips + `</div></div>`;
 }
 
 function renderThread(){

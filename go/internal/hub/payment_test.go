@@ -51,7 +51,7 @@ func TestCostIsAgentsTimesPrice(t *testing.T) {
 
 func TestQuotePricesSimpleTaskAtOneAgent(t *testing.T) {
 	h := payTestHub(true, "")
-	q := h.Quote("What is distributed consensus?", 0)
+	q := h.Quote("What is distributed consensus?", 0, AlgConfig{})
 	if q.HIVE != 1 || FormatHive(q.CostWei) != "1" {
 		t.Fatalf("quote = %d agents, %s HIVE; want 1 agent, 1 HIVE", q.HIVE, FormatHive(q.CostWei))
 	}
@@ -67,7 +67,7 @@ func TestSettleRejectsMissingPayment(t *testing.T) {
 	if !ok || pe.Status != http.StatusPaymentRequired {
 		t.Fatalf("want a 402 PaymentError, got %v", err)
 	}
-	q := h.Quote("What is distributed consensus?", 0)
+	q := h.Quote("What is distributed consensus?", 0, AlgConfig{})
 	_, _, err = h.Settle(context.Background(), q.ID, "0x1234", q.Task)
 	pe, ok = err.(*PaymentError)
 	if !ok || pe.Status != http.StatusBadRequest {

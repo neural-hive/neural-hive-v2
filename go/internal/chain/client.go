@@ -141,16 +141,55 @@ func (c *Client) Call(contract, method string, out interface{}, args ...interfac
 	return unpackCallResult(a, m, out, ret)
 }
 
+// nextNonce returns the next nonce for the signing account. It always adopts the fresh pending
+// nonce from the node and never goes backwards, so a stale local cache can never make this
+// client submit a transaction with a nonce the account has already consumed - the
+// tx-does-not-have-the-correct-nonce / nonce-too-low error. Several Neural Hive processes
+// (coordinator, relayer, hub) share the deployer key, so the on-chain pending nonce is the
+// only source of truth.
 func (c *Client) nextNonce() (uint64, error) {
 	n, err := c.Eth.PendingNonceAt(context.Background(), c.From)
-	if err == nil && n > c.nonce {
+	if err != nil {
+		return c.nonce, nil
+	}
+	if n > c.nonce {
 		c.nonce = n
 	}
 	return c.nonce, nil
 }
 
-// Send signs and submits a state-changing transaction and waits for it to be mined.
+// isNonceError reports whether an error is a stale or duplicate nonce rejection from the node.
+func isNonceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "nonce too low") ||
+		strings.Contains(m, "correct nonce") ||
+		strings.Contains(m, "already known") ||
+		strings.Contains(m, "replacement transaction underpriced")
+}
+
+// Send signs and submits a state-changing transaction and waits for it to be mined. A stale-nonce
+// rejection (several processes share the deployer key) is retried once with a freshly read on-chain
+// nonce, so transient nonce races self-heal instead of failing the caller.
 func (c *Client) Send(contract, method string, args ...interface{}) (*types.Receipt, error) {
+	var rc *types.Receipt
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		rc, err = c.sendOnce(contract, method, args...)
+		if err == nil || !isNonceError(err) {
+			return rc, err
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return rc, err
+}
+
+func (c *Client) sendOnce(contract, method string, args ...interface{}) (*types.Receipt, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -184,8 +223,25 @@ func (c *Client) Send(contract, method string, args ...interface{}) (*types.Rece
 	return rc, nil
 }
 
-// SendAndHashAs is a helper for contracts where we need the returned value; we just return the tx hash.
+// SendTxOnly submits a state-changing transaction and returns its hash, retrying once on a stale
+// nonce just like Send.
 func (c *Client) SendTxOnly(contract, method string, args ...interface{}) (common.Hash, error) {
+	var h common.Hash
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		h, err = c.sendTxOnlyOnce(contract, method, args...)
+		if err == nil || !isNonceError(err) {
+			return h, err
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return h, err
+}
+
+func (c *Client) sendTxOnlyOnce(contract, method string, args ...interface{}) (common.Hash, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

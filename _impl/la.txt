@@ -1,0 +1,9 @@
+  function loadAgents(){ N.get(@QO@/agents@QO@).then(function(d){ var list=(d.agents||[]); var box=D(@QO@agentList@QO@); box.innerHTML=@QO@@QO@; var n=Math.min(list.length,6); for(var i=0;i@LT@n;i++){ var a=list[i];
+    var row=document.createElement(@QO@div@QO@); row.className=@QO@agent-mini@QO@;
+    var dot=document.createElement(@QO@span@QO@); dot.className=@QO@dot @QO@+(a.status===@QO@online@QO@?@QO@ok@QO@:@QO@bad@QO@); row.appendChild(dot);
+    var nm=document.createElement(@QO@span@QO@); nm.className=@QO@n@QO@; nm.textContent=(a.name||a.id); row.appendChild(nm);
+    var pr=document.createElement(@QO@span@QO@); pr.className=@QO@nh-muted@QO@; pr.textContent=(a.priceHive!=null?(a.priceHive+@QO@ HIVE@QO@):@QO@@QO@); row.appendChild(pr);
+    box.appendChild(row);
+  }
+  if(list.length@GT@n){ var more=document.createElement(@QO@div@QO@); more.className=@QO@nh-muted@QO@; more.style.padding=@QO@6px@QO@; more.textContent=(list.length-n)+@QO@ more agents - @QO@; var link=document.createElement(@QO@a@QO@); link.href=@QO@/agents.html@QO@; link.target=@QO@_blank@QO@; link.textContent=@QO@see all@QO@; more.appendChild(link); box.appendChild(more); }
+  }).catch(function(){}); }

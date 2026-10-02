@@ -11,6 +11,7 @@ const StakingSettlement = artifacts.require("StakingSettlement");
 const TaskCoordinator = artifacts.require("TaskCoordinator");
 const HiveSnowball = artifacts.require("HiveSnowball");
 const MockTeleporterMessenger = artifacts.require("MockTeleporterMessenger");
+const AgentWalletFactory = artifacts.require("AgentWalletFactory");
 
 const INITIAL_SUPPLY = "100000000000000000000000000"; // 100,000,000 HIVE (illustrative)
 const PROTOCOL_FEE_BPS = 700; // 7%
@@ -40,6 +41,10 @@ module.exports = async function (deployer, network, accounts) {
   await deployer.deploy(MockTeleporterMessenger);
   const teleporter = await MockTeleporterMessenger.deployed();
 
+  // One AgentWallet smart contract is deployed per agent by this factory; each holds that agent HIVE.
+  await deployer.deploy(AgentWalletFactory, hive.address);
+  const walletFactory = await AgentWalletFactory.deployed();
+
   // ---- role wiring ----
   await settlement.grantRole(await settlement.SETTLEMENT_ROLE(), coordinator.address);
   await settlement.grantRole(await settlement.SLASHER_ROLE(), snowball.address);
@@ -65,7 +70,8 @@ module.exports = async function (deployer, network, accounts) {
       StakingSettlement: settlement.address,
       TaskCoordinator: coordinator.address,
       HiveSnowball: snowball.address,
-      MockTeleporterMessenger: teleporter.address
+      MockTeleporterMessenger: teleporter.address,
+      AgentWalletFactory: walletFactory.address
     }
   };
 

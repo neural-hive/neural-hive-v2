@@ -1,0 +1,671 @@
+<#
+.SYNOPSIS
+    Neural Hive - build, deploy, start and verify the complete protocol and the
+    multi-agent DeepSeek system on a local Ganache devnet.
+
+.DESCRIPTION
+    Requires an already-running Ganache on http://127.0.0.1:8545 (chain id 1337).
+    This script never starts a blockchain node.
+
+    What it starts (each with its own persistent stdout/stderr log under logs/):
+      * backend      - the coordination layer (coordinator) on 9200
+      * relayer      - the permissionless on-chain relayer on 9300
+      * blockchain   - Ganache + the deployed protocol contracts (pre-existing RPC)
+      * hub          - the multi-agent orchestrator on 9500
+      * frontend     - the agentic workspace UI served by the Hub on 9500
+      * deepseek     - N independent REAL DeepSeek agents, one process each, each on
+                       its own port with its own id, index and capability tags
+      * mock agents  - the deterministic on-chain agents on 9101-9105 (preserved)
+      * deepseek-agent (9107) - the on-chain routable DeepSeek answer agent (preserved)
+
+    It then verifies, with real HTTP requests and real DeepSeek API calls, that:
+      * every process is listening and reports healthy;
+      * each DeepSeek agent answers a real prompt with a real model completion;
+      * frontend -> Hub -> several DeepSeek agents -> aggregation -> answer works;
+      * the final answer hash is anchored on-chain through the backend.
+
+.PARAMETER SkipContractTests
+    Skip the Truffle contract test suite.
+
+.PARAMETER SkipGoTests
+    Skip the Go unit test suite.
+
+.PARAMETER SkipDeploy
+    Skip compile/deploy/build and start the services from the existing binaries.
+
+.PARAMETER NoStart
+    Deploy, test and report, but stop the services again before exiting.
+
+.PARAMETER NoE2E
+    Do not run the live DeepSeek end-to-end scenarios.
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\start.ps1
+#>
+[CmdletBinding()]
+param(
+    [switch]$SkipContractTests,
+    [switch]$SkipGoTests,
+    [switch]$SkipDeploy,
+    [switch]$NoStart,
+    [switch]$NoE2E
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+$Root = $PSScriptRoot
+if (-not $Root) { $Root = (Get-Location).Path }
+$ContractsDir = Join-Path $Root 'contracts'
+$GoDir = Join-Path $Root 'go'
+$BinDir = Join-Path $GoDir 'bin'
+$WebDir = Join-Path $Root 'web'
+$LogDir = Join-Path $Root 'logs'
+$RpcUrl = 'http://127.0.0.1:8545'
+$ChainIdHex = '0x539'
+
+$HubPort = 9500
+$CoordinatorPort = 9200
+$RelayerPort = 9300
+$DeepSeekAgentPort = 9107
+$MockAgentBasePort = 9101
+$MockAgentCount = 5
+$DeepSeekBasePort = 9401
+$DeepSeekStartIndex = 100
+$DeepSeekAgentCount = 5
+
+$script:Results = @()
+$script:Failed = 0
+$script:Started = @()
+$script:TruffleExe = $null
+$script:TrufflePrefix = @()
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+
+function Write-Stage { param([string]$Name) Write-Host '' ; Write-Host ('=== ' + $Name + ' ===') -ForegroundColor Cyan }
+function Write-Info { param([string]$Message) Write-Host ('   ' + $Message) }
+function Write-Warn { param([string]$Message) Write-Host ('   [!] ' + $Message) -ForegroundColor Yellow }
+
+function Add-Result {
+    param([string]$Name, [bool]$Ok, [string]$Detail)
+    $script:Results += [pscustomobject]@{ Stage = $Name; Ok = $Ok; Detail = $Detail }
+    if ($Ok) { Write-Host ('   [PASS] ' + $Name + ' :: ' + $Detail) -ForegroundColor Green }
+    else { $script:Failed++; Write-Host ('   [FAIL] ' + $Name + ' :: ' + $Detail) -ForegroundColor Red }
+}
+
+function Test-Command { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($raw in Get-Content $Path) {
+        $line = $raw.Trim()
+        if ($line -eq '' -or $line.StartsWith('#')) { continue }
+        $i = $line.IndexOf('=')
+        if ($i -lt 1) { continue }
+        $k = $line.Substring(0, $i).Trim()
+        $v = $line.Substring($i + 1).Trim()
+        [Environment]::SetEnvironmentVariable($k, $v, 'Process')
+    }
+}
+
+function Invoke-Step {
+    param([string]$Name, [string]$File, [string[]]$CmdArgs, [string]$WorkDir)
+    Write-Info ($File + ' ' + ($CmdArgs -join ' '))
+    Push-Location $WorkDir
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $output = & $File @CmdArgs 2>&1 | ForEach-Object { $_.ToString() }; $code = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prevEap; Pop-Location }
+    foreach ($line in $output) { Write-Host ('      ' + $line) }
+    Add-Result $Name ($code -eq 0) ('exit code ' + $code)
+    return ($code -eq 0)
+}
+
+function Get-Rpc {
+    param([string]$Method, [object[]]$Params)
+    $body = @{ jsonrpc = '2.0'; id = 1; method = $Method; params = $Params } | ConvertTo-Json -Compress -Depth 5
+    return Invoke-RestMethod -Uri $RpcUrl -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 8
+}
+
+function Test-Url {
+    param([string]$Url, [int]$TimeoutSec = 3)
+    try {
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+        return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
+    } catch {
+        if ($_.Exception.Response) { return $true }
+        return $false
+    }
+}
+
+function Wait-Http {
+    param([string]$Url, [int]$TimeoutSec)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Url $Url 3) { return $true }
+        Start-Sleep -Milliseconds 400
+    }
+    return $false
+}
+
+function Get-PortOwners {
+    param([int[]]$Ports)
+    $owners = @()
+    $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue
+    foreach ($c in $conns) {
+        if ($Ports -contains [int]$c.LocalPort) { $owners += [int]$c.OwningProcess }
+    }
+    return ($owners | Select-Object -Unique)
+}
+
+function Stop-NeuralHiveProcesses {
+    $names = @('coordinator','relayer','agent','deepseek-agent','hive-agents','hive-agent','hub','e2e')
+    foreach ($name in $names) {
+        Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Info ('stopping stale ' + $name + ' pid ' + $_.Id)
+            try { $_.Kill() } catch { }
+        }
+    }
+    $ports = @($HubPort) + @($CoordinatorPort) + @($RelayerPort) + @($DeepSeekAgentPort) + @(($DeepSeekBasePort)..($DeepSeekBasePort + 9)) + @(($MockAgentBasePort)..($MockAgentBasePort + 4))
+    foreach ($ownerPid in (Get-PortOwners $ports)) {
+        try {
+            $p = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+            if ($p) { Write-Info ('releasing port held by ' + $p.ProcessName + ' pid ' + $ownerPid); $p.Kill() }
+        } catch { }
+    }
+    Start-Sleep -Milliseconds 900
+}
+
+function Start-Logged {
+    param([string]$Name, [string]$File, [string[]]$CmdArgs, [string]$WorkDir, [string]$LogPrefix = '')
+    if (-not $LogPrefix) { $LogPrefix = $Name }
+    $stdout = Join-Path $LogDir ($LogPrefix + '.out.log')
+    $stderr = Join-Path $LogDir ($LogPrefix + '.err.log')
+    $p = Start-Process -FilePath $File -ArgumentList $CmdArgs -WorkingDirectory $WorkDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    $script:Started += $p
+    Write-Info ('started ' + $Name + ' (pid ' + $p.Id + ') -> ' + $stdout)
+    return $p
+}
+
+function Merge-ProcessLogs {
+    param([string[]]$Prefixes)
+    foreach ($prefix in $Prefixes) {
+        $out = Join-Path $LogDir ($prefix + '.out.log')
+        $err = Join-Path $LogDir ($prefix + '.err.log')
+        $combined = Join-Path $LogDir ($prefix + '.log')
+        $lines = @('=== Neural Hive combined log ' + $prefix + ' ' + (Get-Date).ToString('s') + ' ===')
+        if (Test-Path $out) { $lines += '--- stdout ---'; $lines += (Get-Content $out -ErrorAction SilentlyContinue) }
+        if (Test-Path $err) { $lines += '--- stderr ---'; $lines += (Get-Content $err -ErrorAction SilentlyContinue) }
+        Set-Content -Path $combined -Value $lines -Encoding UTF8
+    }
+}
+
+
+$script:DeepSeekRoster = @()
+function Build-DeepSeekRoster {
+    param([int]$Count, [int]$BasePort, [int]$StartIndex)
+    $roster = @()
+    for ($i = 0; $i -lt $Count; $i++) {
+        $port = $BasePort + $i
+        $tags = [Environment]::GetEnvironmentVariable('AGENT_' + ($i + 1) + '_TAGS', 'Process')
+        if (-not $tags) { $tags = 'research,analysis' }
+        $roster += [pscustomobject]@{
+            Id    = ('agent-{0:D2}' -f ($i + 1))
+            Index = $StartIndex + $i
+            Port  = $port
+            Tags  = $tags
+        }
+    }
+    return $roster
+}
+
+function Get-DeepSeekRoster {
+    $roster = @()
+    $explicit = [Environment]::GetEnvironmentVariable('HIVE_AGENT_ROSTER', 'Process')
+    if ($explicit) {
+        foreach ($entry in $explicit.Split(';')) {
+            $parts = $entry.Trim().Split(':' )
+            if ($parts.Count -lt 2) { continue }
+            $p = 0; if (-not [int]::TryParse($parts[1], [ref]$p)) { continue }
+            $tags = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { 'research,analysis' }
+            $roster += [pscustomobject]@{ Id = $parts[0].Trim(); Index = $DeepSeekStartIndex + $roster.Count; Port = $p; Tags = $tags }
+        }
+        if ($roster.Count -gt 0) { return $roster }
+    }
+    $count = $DeepSeekAgentCount
+    $basePort = $DeepSeekBasePort
+    $startIdx = $DeepSeekStartIndex
+    if ([Environment]::GetEnvironmentVariable('HIVE_AGENT_COUNT', 'Process')) { $count = [int]$env:HIVE_AGENT_COUNT }
+    if ([Environment]::GetEnvironmentVariable('HIVE_AGENT_BASE_PORT', 'Process')) { $basePort = [int]$env:HIVE_AGENT_BASE_PORT }
+    if ([Environment]::GetEnvironmentVariable('HIVE_AGENT_START_INDEX', 'Process')) { $startIdx = [int]$env:HIVE_AGENT_START_INDEX }
+    return (Build-DeepSeekRoster -Count $count -BasePort $basePort -StartIndex $startIdx)
+}
+
+
+
+
+Write-Host ''
+Write-Host 'Neural Hive :: full-system startup and verification' -ForegroundColor Magenta
+Write-Info ('repository root: ' + $Root)
+Write-Info ('started at: ' + (Get-Date).ToString('s'))
+
+$banner = 'Neural Hive startup ' + (Get-Date).ToString('s') + ': backend (coordinator), relayer, blockchain (Ganache + contracts), Hub, frontend UI, and multiple real DeepSeek agents (one process per port).'
+Set-Content -Path (Join-Path $LogDir 'implementation.log') -Value $banner
+
+Write-Stage '1/10 Prerequisites'
+$prereqOk = $true
+foreach ($c in @('node', 'go')) {
+    if (Test-Command $c) {
+        $ver = '' ; if ($c -eq 'go') { $ver = (go version 2>&1 | Select-Object -First 1) } else { $ver = (& $c --version 2>&1 | Select-Object -First 1) }
+        Add-Result ('prerequisite ' + $c) $true ([string]$ver)
+    } else {
+        Add-Result ('prerequisite ' + $c) $false 'not found on PATH'
+        $prereqOk = $false
+    }
+}
+if (Test-Command 'truffle') { $script:TruffleExe = 'truffle'; $script:TrufflePrefix = @() }
+else { $script:TruffleExe = 'npx'; $script:TrufflePrefix = @('truffle') }
+Add-Result 'prerequisite truffle' ($null -ne (Get-Command $script:TruffleExe -ErrorAction SilentlyContinue)) ($script:TruffleExe + ' ' + ($script:TrufflePrefix -join ' '))
+if (-not $prereqOk) { Write-Host 'missing prerequisites; aborting' -ForegroundColor Red; exit 1 }
+
+Write-Stage '2/10 Blockchain (Ganache devnet)'
+try {
+    $chain = Get-Rpc 'eth_chainId' @()
+    Add-Result 'ganache rpc' ($chain.result -eq $ChainIdHex) ('chainId ' + $chain.result + ' at ' + $RpcUrl)
+} catch {
+    Add-Result 'ganache rpc' $false $_.Exception.Message
+    Write-Host 'Ganache is not reachable on 127.0.0.1:8545. Start a node first; this script never starts one.' -ForegroundColor Red
+    exit 1
+}
+
+
+Write-Stage '3/10 Environment'
+$envFile = Join-Path $Root '.env'
+if (-not (Test-Path $envFile)) {
+    $example = Join-Path $Root '.env.example'
+    if (Test-Path $example) { Copy-Item $example $envFile }
+    Add-Result '.env' $false 'missing; created from .env.example - fill in DEEPSEEK_API_KEY and the dev keys then re-run'
+    exit 1
+}
+Import-DotEnv $envFile
+Add-Result '.env loaded' $true $envFile
+
+$RelayerUrl = [Environment]::GetEnvironmentVariable('RELAYER_URL', 'Process')
+if (-not $RelayerUrl) { $RelayerUrl = 'http://127.0.0.1:' + $RelayerPort }
+$CoordinatorUrl = [Environment]::GetEnvironmentVariable('COORDINATOR_API_URL', 'Process')
+if (-not $CoordinatorUrl) { $CoordinatorUrl = 'http://127.0.0.1:' + $CoordinatorPort }
+$HubUrl = 'http://127.0.0.1:' + $HubPort
+$DeepSeekAgentUrl = [Environment]::GetEnvironmentVariable('DEEPSEEK_AGENT_URL', 'Process')
+if (-not $DeepSeekAgentUrl) { $DeepSeekAgentUrl = 'http://127.0.0.1:' + $DeepSeekAgentPort }
+$DeepSeekKey = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY', 'Process')
+$keyDesc = 'DEEPSEEK_API_KEY is empty'; if ($DeepSeekKey) { $keyDesc = 'present (server-side only)' }
+Add-Result 'DeepSeek API key configured' ([bool]$DeepSeekKey) $keyDesc
+
+$script:Roster = Get-DeepSeekRoster
+$rosterDesc = ($script:Roster | ForEach-Object { $_.Id + ':' + $_.Port + ':' + $_.Tags }) -join '; '
+Add-Result 'DeepSeek agent roster resolved' ($script:Roster.Count -gt 0) ($rosterDesc)
+$DeepSeekBasePort = $script:Roster[0].Port
+
+
+$servicesUp = $false
+if (-not $SkipDeploy) {
+    Write-Stage '4/10 Compile contracts'
+    Invoke-Step 'truffle compile' $script:TruffleExe ($script:TrufflePrefix + @('compile')) $ContractsDir | Out-Null
+
+    Write-Stage '5/10 Go unit tests'
+    if ($SkipGoTests) { Write-Info 'skipped (-SkipGoTests)' } else { Invoke-Step 'go test ./...' 'go' @('test', './...') $GoDir | Out-Null }
+
+    Write-Stage '6/10 Contract tests'
+    Invoke-Step 'truffle migrate --reset (prepare the test network)' $script:TruffleExe ($script:TrufflePrefix + @('migrate', '--reset', '--network', 'ganache')) $ContractsDir | Out-Null
+    if ($SkipContractTests) { Write-Info 'skipped (-SkipContractTests)' } else { Invoke-Step 'truffle test --network ganache' $script:TruffleExe ($script:TrufflePrefix + @('test', '--network', 'ganache')) $ContractsDir | Out-Null }
+
+    Write-Stage '7/10 Deploy protocol and build binaries'
+    Invoke-Step 'truffle migrate --reset --network ganache' $script:TruffleExe ($script:TrufflePrefix + @('migrate', '--reset', '--network', 'ganache')) $ContractsDir | Out-Null
+    $deployFile = Join-Path $ContractsDir 'deployments.json'
+    Add-Result 'deployments.json written' (Test-Path $deployFile) $deployFile
+    if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir | Out-Null }
+    Invoke-Step 'build agent' 'go' @('build', '-o', (Join-Path $BinDir 'agent.exe'), './cmd/agent') $GoDir | Out-Null
+    Invoke-Step 'build relayer' 'go' @('build', '-o', (Join-Path $BinDir 'relayer.exe'), './cmd/relayer') $GoDir | Out-Null
+    Invoke-Step 'build coordinator' 'go' @('build', '-o', (Join-Path $BinDir 'coordinator.exe'), './cmd/coordinator') $GoDir | Out-Null
+    Invoke-Step 'build e2e' 'go' @('build', '-o', (Join-Path $BinDir 'e2e.exe'), './cmd/e2e') $GoDir | Out-Null
+    Invoke-Step 'build deepseek-agent' 'go' @('build', '-o', (Join-Path $BinDir 'deepseek-agent.exe'), './cmd/deepseek-agent') $GoDir | Out-Null
+    Invoke-Step 'build hive-agent' 'go' @('build', '-o', (Join-Path $BinDir 'hive-agent.exe'), './cmd/hive-agent') $GoDir | Out-Null
+    Invoke-Step 'build hive-agents' 'go' @('build', '-o', (Join-Path $BinDir 'hive-agents.exe'), './cmd/hive-agents') $GoDir | Out-Null
+    Invoke-Step 'build hub' 'go' @('build', '-o', (Join-Path $BinDir 'hub.exe'), './cmd/hub') $GoDir | Out-Null
+    Add-Result 'frontend assets present' (Test-Path (Join-Path $WebDir 'index.html')) (Join-Path $WebDir 'index.html')
+} else {
+    Write-Stage '4-7/10 Deploy and build (skipped)'
+    Write-Info 'skipped (-SkipDeploy): using the existing binaries and deployment'
+}
+$HubExe = Join-Path $BinDir 'hub.exe'
+$CoordinatorExe = Join-Path $BinDir 'coordinator.exe'
+$RelayerExe = Join-Path $BinDir 'relayer.exe'
+$AgentExe = Join-Path $BinDir 'agent.exe'
+$DeepSeekAgentExe = Join-Path $BinDir 'deepseek-agent.exe'
+$HiveAgentExe = Join-Path $BinDir 'hive-agent.exe'
+foreach ($pair in @(@('hub', $HubExe), @('coordinator', $CoordinatorExe), @('relayer', $RelayerExe), @('hive-agent', $HiveAgentExe), @('agent', $AgentExe))) {
+    Add-Result ('binary ' + $pair[0]) (Test-Path $pair[1]) $pair[1]
+}
+
+
+Write-Stage '8/10 Start services'
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+Stop-NeuralHiveProcesses
+
+# --- deterministic mock on-chain agents (preserved) ---
+$mockSkills = @('risk-scoring,anomaly-detection', 'explain,summarization', 'compliance,moderation', 'market-data,trading-signal', 'smart-contract-audit,code-review')
+for ($i = 0; $i -lt $mockSkills.Count; $i++) {
+    Start-Logged ('mock-agent ' + ($i + 1)) $AgentExe @('-index', $i, '-port', ($MockAgentBasePort + $i), '-skills', $mockSkills[$i], '-mode', 'honest') $GoDir ('agent' + ($i + 1)) | Out-Null
+}
+
+# --- the on-chain routable DeepSeek answer agent (preserved) ---
+$deepseekIndex = [Environment]::GetEnvironmentVariable('DEEPSEEK_AGENT_INDEX', 'Process')
+if (-not $deepseekIndex) { $deepseekIndex = '6' }
+if ($DeepSeekKey) {
+    Start-Logged 'deepseek-agent' $DeepSeekAgentExe @('-index', $deepseekIndex, '-port', $DeepSeekAgentPort, '-skills', 'explain,summarization,reasoning', '-mode', 'honest') $GoDir 'deepseek-agent' | Out-Null
+} else {
+    Write-Warn 'DEEPSEEK_API_KEY not set; the on-chain DeepSeek agent will not be started'
+}
+
+# --- relayer (on-chain submission service) ---
+Start-Logged 'relayer' $RelayerExe @('-port', $RelayerPort) $GoDir 'relayer' | Out-Null
+
+# --- backend: the coordination layer ---
+Start-Logged 'coordinator' $CoordinatorExe @('-port', $CoordinatorPort) $GoDir 'backend' | Out-Null
+
+# --- the independent DeepSeek agent pool: ONE PROCESS PER AGENT, each on its own port ---
+foreach ($a in $script:Roster) {
+    Start-Logged ('deepseek ' + $a.Id) $HiveAgentExe @('-id', $a.Id, '-index', $a.Index, '-port', $a.Port, '-tags', $a.Tags) $GoDir ('deepseek-' + $a.Id) | Out-Null
+}
+
+# --- Hub (multi-agent orchestrator + frontend UI) ---
+# Per-start secret that lets this script verify the Hub without a MetaMask wallet. It is generated
+# here, handed only to the Hub process through the environment and never written to .env, so a
+# browser user can never skip the HIVE payment with it.
+$script:SelfTestToken = [guid]::NewGuid().ToString('N')
+[Environment]::SetEnvironmentVariable('HUB_SELFTEST_TOKEN', $script:SelfTestToken, 'Process')
+Start-Logged 'hub' $HubExe @('-port', $HubPort) $GoDir 'hub' | Out-Null
+Write-Info 'frontend UI is served by the Hub at http://127.0.0.1:9500/ (web/)'
+
+
+Write-Stage '9/10 Service health'
+$allHealthy = $true
+for ($i = 0; $i -lt $MockAgentCount; $i++) {
+    $url = 'http://127.0.0.1:' + ($MockAgentBasePort + $i) + '/health'
+    $ok = Wait-Http $url 60
+    if (-not $ok) { $allHealthy = $false }
+    Add-Result ('mock agent ' + ($i + 1) + ' health') $ok $url
+}
+$relayerOk = Wait-Http ($RelayerUrl + '/health') 60
+Add-Result 'relayer health' $relayerOk ($RelayerUrl + '/health')
+if (-not $relayerOk) { $allHealthy = $false }
+$coordOk = Wait-Http ($CoordinatorUrl + '/health') 60
+Add-Result 'backend (coordinator) health' $coordOk ($CoordinatorUrl + '/health')
+if (-not $coordOk) { $allHealthy = $false }
+$hubOk = Wait-Http ($HubUrl + '/health') 60
+Add-Result 'hub health' $hubOk ($HubUrl + '/health')
+if (-not $hubOk) { $allHealthy = $false }
+
+# frontend: the workspace UI must actually be served
+$uiOk = $false
+try { $ui = Invoke-WebRequest -Uri ($HubUrl + '/') -UseBasicParsing -TimeoutSec 10; $uiOk = ($ui.StatusCode -eq 200 -and $ui.Content -match 'Neural Hive') } catch { }
+Add-Result 'frontend UI served (GET /)' $uiOk ($HubUrl + '/ ')
+if (-not $uiOk) { $allHealthy = $false }
+
+foreach ($a in $script:Roster) {
+    $url = 'http://127.0.0.1:' + $a.Port + '/health'
+    $ok = Wait-Http $url 60
+    if (-not $ok) { $allHealthy = $false }
+    Add-Result ('deepseek ' + $a.Id + ' health (port ' + $a.Port + ')') $ok $url
+}
+if ($DeepSeekKey) {
+    $dsOk = Wait-Http ($DeepSeekAgentUrl + '/health') 60
+    Add-Result ('deepseek-agent (:' + $DeepSeekAgentPort + ') health') $dsOk ($DeepSeekAgentUrl + '/health')
+}
+
+# each service also gets a merged, human-readable .log next to its .out.log / .err.log
+$logPrefixes = @('hub','backend','relayer','deepseek-agent')
+for ($i = 0; $i -lt $MockAgentCount; $i++) { $logPrefixes += ('agent' + ($i + 1)) }
+foreach ($a in $script:Roster) { $logPrefixes += ('deepseek-' + $a.Id) }
+Merge-ProcessLogs $logPrefixes
+
+
+Write-Stage '10/10 Live DeepSeek verification'
+if ($NoE2E) {
+    Write-Info 'skipped (-NoE2E)'
+} else {
+    $directOk = $true
+    foreach ($a in $script:Roster) {
+        $body = @{ subTaskId = 'verify-' + $a.Id; taskId = 'startup-verify'; prompt = 'Reply with exactly one short sentence defining distributed consensus.' } | ConvertTo-Json -Compress
+        $probeOk = $false
+        $detail = ''
+        try {
+            $r = Invoke-RestMethod -Uri ('http://127.0.0.1:' + $a.Port + '/task') -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 180
+            if ($r.answer -and $r.provider -eq 'deepseek' -and $r.model) {
+                $probeOk = $true
+                $detail = 'model=' + $r.model + ' provider=' + $r.provider + ' latencyMs=' + $r.latencyMs + ' chars=' + $r.answer.Length + ' requestId=' + $r.requestId
+            } else { $detail = 'empty or non-DeepSeek answer' }
+        } catch { $detail = $_.Exception.Message }
+$firstLine = ''; if ($probeOk -and $r) { $firstLine = (([string]$r.answer) -split [Environment]::NewLine)[0] }
+        if (-not $probeOk) { $directOk = $false }
+        Add-Result ('deepseek ' + $a.Id + ' REAL API call') $probeOk $detail
+        if ($firstLine) { Write-Host ('      answer: ' + $firstLine) -ForegroundColor DarkGray }
+    }
+    Add-Result 'all DeepSeek agents made a real API call' $directOk ('' + $script:Roster.Count + ' agents')
+
+
+    if ($hubOk) {
+        $simpleTask = 'What is distributed consensus?'
+        $complexTask = 'Analyze the architecture of a decentralized AI agent network, identify security risks, and propose an implementation strategy.'
+        $e2eLog = Join-Path $LogDir 'e2e.log'
+        Set-Content -Path $e2eLog -Value ('Neural Hive live end-to-end run ' + (Get-Date).ToString('s'))
+        $e2eFailed = 0
+
+        # --- HIVE payment gate: pricing is published, quotes work, and an unpaid task is refused ---
+        $payCfgOk = $false; $payCfgDetail = ''
+        try {
+            $pc = Invoke-RestMethod -Uri ($HubUrl + '/payment/config') -TimeoutSec 15
+            $payCfgOk = ($pc.symbol -eq 'HIVE' -and $pc.token -and $pc.treasury -and $pc.pricePerAgent -and $pc.registrationFeeHive)
+            $payCfgDetail = 'price=' + $pc.pricePerAgent + ' HIVE/agent reg=' + $pc.registrationFeeHive + ' HIVE required=' + $pc.paymentRequired + ' token=' + $pc.token + ' treasury=' + $pc.treasury + ' chainId=' + $pc.chainId
+        } catch { $payCfgDetail = $_.Exception.Message }
+        Add-Result 'hub publishes HIVE price and payment config' $payCfgOk $payCfgDetail
+        if (-not $payCfgOk) { $e2eFailed++ }
+
+        $quoteOk = $false; $quoteDetail = ''
+        try {
+            $qb = @{ task = $simpleTask } | ConvertTo-Json -Compress
+            $qr = Invoke-RestMethod -Uri ($HubUrl + '/quote') -Method Post -ContentType 'application/json' -Body $qb -TimeoutSec 15
+            $quoteOk = [bool]($qr.quoteId -and $qr.costHive)
+            $quoteDetail = 'agents=' + $qr.hive + ' cost=' + $qr.costHive + ' HIVE quoteId=' + $qr.quoteId
+        } catch { $quoteDetail = $_.Exception.Message }
+        Add-Result 'hub prices a task in HIVE (POST /quote)' $quoteOk $quoteDetail
+        if (-not $quoteOk) { $e2eFailed++ }
+
+        if ($pc -and $pc.paymentRequired) {
+            $gateOk = $false; $gateDetail = ''
+            try {
+                $null = Invoke-RestMethod -Uri ($HubUrl + '/task') -Method Post -ContentType 'application/json' -Body (@{ task = $simpleTask } | ConvertTo-Json -Compress) -TimeoutSec 15
+                $gateDetail = 'unpaid task was accepted'
+            } catch {
+                $code = 0; if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+                $gateOk = ($code -eq 402)
+                $gateDetail = 'HTTP ' + $code
+            }
+            Add-Result 'unpaid task is refused (HTTP 402)' $gateOk $gateDetail
+            if (-not $gateOk) { $e2eFailed++ }
+        }
+        # --- agent registration gate: a live probe is required and the HIVE fee must be paid on chain ---
+        $regProbeOk = $false; $regProbeDetail = ''
+        try {
+            $regBody = @{ name = 'startup-probe'; endpoint = 'http://127.0.0.1:9999'; tags = @('verification'); priceHive = 1 } | ConvertTo-Json -Compress
+            $rr = Invoke-RestMethod -Uri ($HubUrl + '/agents/register') -Method Post -ContentType 'application/json' -Body $regBody -TimeoutSec 60
+            $regProbeOk = (-not $rr.ok) -and ($rr.status -eq 'rejected')
+            $regProbeDetail = 'status=' + $rr.status
+        } catch { $regProbeDetail = $_.Exception.Message }
+        Add-Result 'agent registration refuses an unverified agent' $regProbeOk $regProbeDetail
+        if (-not $regProbeOk) { $e2eFailed++ }
+
+        $regFeeOk = $false; $regFeeDetail = ''
+        try {
+            $first = $script:Roster[0]
+            $regBody2 = @{ name = 'startup-live-probe'; endpoint = ('http://127.0.0.1:' + $first.Port); tags = @('verification'); priceHive = 1 } | ConvertTo-Json -Compress
+            $rr2 = Invoke-RestMethod -Uri ($HubUrl + '/agents/register') -Method Post -ContentType 'application/json' -Body $regBody2 -TimeoutSec 90
+            if (-not $rr2.payment) { throw 'no payment object returned' }
+            $unpaid = $false
+            try { $null = Invoke-RestMethod -Uri ($HubUrl + '/agents/register/confirm') -Method Post -ContentType 'application/json' -Body (@{ registrationId = $rr2.registrationId } | ConvertTo-Json -Compress) -TimeoutSec 20 } catch { if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 402) { $unpaid = $true } }
+            $regFeeOk = ($rr2.status -eq 'verified') -and $rr2.payment.costHive -and $unpaid
+            $regFeeDetail = 'probe=verified fee=' + $rr2.payment.costHive + ' HIVE confirm-without-payment-refused=' + $unpaid
+        } catch { $regFeeDetail = $_.Exception.Message }
+        Add-Result 'agent registration requires the HIVE fee (verified on chain)' $regFeeOk $regFeeDetail
+        if (-not $regFeeOk) { $e2eFailed++ }
+
+
+        foreach ($scenario in @(@('simple', $simpleTask, 1), @('complex', $complexTask, 2))) {
+            $name = $scenario[0]; $task = $scenario[1]; $minHive = $scenario[2]
+            $body = @{ task = $task } | ConvertTo-Json -Compress
+            $t0 = Get-Date
+            $res = $null
+            $err = ''
+            try { $res = Invoke-RestMethod -Uri ($HubUrl + '/task') -Method Post -ContentType 'application/json' -Headers @{ 'X-Hive-Selftest' = $script:SelfTestToken } -Body $body -TimeoutSec 360 } catch { $err = $_.Exception.Message }
+            $elapsed = [int]((Get-Date) - $t0).TotalMilliseconds
+            if (-not $res) {
+                $e2eFailed++
+                Add-Result ('e2e ' + $name + ' (frontend -> Hub -> agents -> aggregation)') $false $err
+                Add-Content -Path $e2eLog -Value ('FAIL ' + $name + ' :: ' + $err)
+                continue
+            }
+            Add-Content -Path $e2eLog -Value ('--- scenario ' + $name + ' ---')
+            Add-Content -Path $e2eLog -Value ('taskId=' + $res.taskId + ' complexity=' + $res.complexity.level + ' hive=' + $res.hive + ' agents=' + ($res.agentsUsed -join ','))
+            Add-Content -Path $e2eLog -Value ('elapsedMs=' + $res.elapsedMs + ' answerHash=' + $res.answerHash)
+            if ($res.payment) { Add-Content -Path $e2eLog -Value ('payment: mode=' + $res.payment.mode + ' agents=' + $res.payment.agents + ' price=' + $res.payment.pricePerAgent + ' HIVE/agent cost=' + $res.payment.costHive + ' HIVE') }
+            Add-Content -Path $e2eLog -Value ('answer:' + [Environment]::NewLine + [string]$res.answer)
+            $agentCount = @($res.agentsUsed).Count
+            $okAgents = $false; foreach ($ar in $res.agentResults) { if ($ar.status -eq 'ok' -and $ar.provider -eq 'deepseek') { $okAgents = $true } }
+            $okSimple = ($name -ne 'simple') -or ($res.hive -ge 1)
+            $okComplex = ($name -ne 'complex') -or ($agentCount -ge 2)
+            $ok = ($res.answer -and $res.answer.Length -gt 0 -and $res.answerHash -and $okAgents -and $okSimple -and $okComplex)
+            if (-not $ok) { $e2eFailed++ }
+            $detail = 'hive=' + $res.hive + ' agents=' + ($res.agentsUsed -join ',') + ' answerChars=' + ([string]$res.answer).Length + ' hash=' + $res.answerHash + ' elapsedMs=' + $res.elapsedMs
+            Add-Result ('e2e ' + $name + ' (frontend -> Hub -> agents -> aggregation)') $ok $detail
+            Write-Host ('      final answer: ' + (([string]$res.answer -split '`n')[0])) -ForegroundColor DarkGray
+            if ($res.anchor) {
+                $anchorOk = [bool]$res.anchor.ok
+                $anchorDetail = 'requestId=' + $res.anchor.requestId + ' requestTx=' + $res.anchor.requestTx + ' settleTx=' + $res.anchor.settleTx + ' network=' + $res.anchor.network
+                if (-not $anchorOk) { $anchorDetail = $anchorDetail + ' error=' + $res.anchor.error }
+                Add-Result ('e2e ' + $name + ' on-chain answer anchor') $anchorOk $anchorDetail
+                Add-Content -Path $e2eLog -Value ('anchor: ok=' + $anchorOk + ' ' + $anchorDetail)
+                if (-not $anchorOk) { $e2eFailed++ }
+            } else {
+                Add-Result ('e2e ' + $name + ' on-chain answer anchor') $false 'no anchor object returned'
+                $e2eFailed++
+            }
+        }
+        
+        # --- settlement: the hub keeps its fee and pays the serving agents on chain ---
+        $lastResult = $null
+        try {
+            $tl = Invoke-RestMethod -Uri ($HubUrl + "/history") -TimeoutSec 15
+            if ($tl.tasks -and $tl.tasks.Count -gt 0) { $lastResult = $tl.tasks[0] }
+        } catch {}
+        $settleOk = $false; $settleDetail = ""
+        try {
+            if ($lastResult -and $lastResult.taskId) {
+                $tr = Invoke-RestMethod -Uri ($HubUrl + "/trace/" + [uri]::EscapeDataString($lastResult.taskId)) -TimeoutSec 15
+                if ($tr.settlement) {
+                    $po = @($tr.settlement.payouts | Where-Object { $_.txHash })
+                    $settleOk = ($tr.settlement.ok -and $tr.settlement.agents -ge 1 -and $po.Count -ge 1)
+                    $settleDetail = "fee=" + $tr.settlement.feeHive + " (" + $tr.settlement.feePercent + "%) agents=" + $tr.settlement.agents + " paid=" + $po.Count + " treasury=" + $tr.settlement.treasury
+                } else { $settleDetail = "no settlement object on the trace" }
+            } else { $settleDetail = "no completed task found" }
+        } catch { $settleDetail = $_.Exception.Message }
+        Add-Result "hub fee split paid the serving agents on chain" $settleOk $settleDetail
+        if (-not $settleOk) { $e2eFailed++ }
+
+        # --- each agent has its own wallet that holds HIVE and can be withdrawn by the owner ---
+        $walletOk = $false; $walletDetail = ""
+        try {
+            $first = $script:Roster[0]
+            $w = Invoke-RestMethod -Uri ($HubUrl + "/agents/" + [uri]::EscapeDataString($first.Id) + "/wallet") -TimeoutSec 20
+            $walletOk = [bool]($w.contract -and $w.owner)
+            $walletDetail = "contract=" + $w.contract + " balance=" + $w.balanceHive + " HIVE owner=" + $w.owner
+        } catch { $walletDetail = $_.Exception.Message }
+        Add-Result "agent has its own HIVE smart-contract wallet and an owner" $walletOk $walletDetail
+        if (-not $walletOk) { $e2eFailed++ }
+        # the withdraw is an owner-only transaction on the agent smart contract
+        $wdOk = $false; $wdDetail = ""
+        try {
+            $wd = Invoke-RestMethod -Uri ($HubUrl + "/agents/" + [uri]::EscapeDataString($first.Id) + "/withdraw") -Method Post -ContentType "application/json" -Body (@{ owner = $w.owner } | ConvertTo-Json -Compress) -TimeoutSec 20
+            $wdOk = [bool]($wd.contract -and $wd.data -and ($wd.data -like "0x3ccfd60b*"))
+            $wdDetail = "contract=" + $wd.contract + " method=" + $wd.method + " owner=" + $wd.owner
+        } catch { $wdDetail = $_.Exception.Message }
+        Add-Result "agent wallet withdraw is an owner-only contract transaction" $wdOk $wdDetail
+        if (-not $wdOk) { $e2eFailed++ }
+
+        # --- chat history: a request carrying prior turns is accepted and answered ---
+        $histOk = $false; $histDetail = ""
+        try {
+            $hb = @{ task = "What did we just discuss?"; history = @(@{ role = "user"; content = "Explain distributed consensus." }, @{ role = "assistant"; content = "It is agreement among nodes." }) } | ConvertTo-Json -Compress -Depth 5
+            $hr = Invoke-RestMethod -Uri ($HubUrl + "/task") -Method Post -ContentType "application/json" -Headers @{ "X-Hive-Selftest" = $script:SelfTestToken } -Body $hb -TimeoutSec 360
+            $histOk = [bool]($hr.answer -and $hr.answer.Length -gt 0)
+            $histDetail = "answered with " + ([string]$hr.answer).Length + " chars"
+        } catch { $histDetail = $_.Exception.Message }
+        Add-Result "request with chat history is accepted and answered" $histOk $histDetail
+        # Extra verifications: unique on-chain smart-contract identity + balance per agent, and a configurable conversation-history cap.
+        . (Join-Path $Root "start_extra_checks.ps1")
+        if (-not $histOk) { $e2eFailed++ }
+
+        # --- price update is owner-only: a non-owner is refused ---
+        $ownerGateOk = $false; $ownerGateDetail = ""
+        try {
+            $first2 = $script:Roster[0]
+            $pb = @{ priceHive = 2; txHash = ("0x" + ("0" * 64)); from = "0x000000000000000000000000000000000000dEaD" } | ConvertTo-Json -Compress
+            try { $null = Invoke-RestMethod -Uri ($HubUrl + "/agents/" + [uri]::EscapeDataString($first2.Id) + "/price") -Method Post -ContentType "application/json" -Body $pb -TimeoutSec 15; $ownerGateDetail = "non-owner price update was accepted" } catch { $code = 0; if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }; $ownerGateOk = ($code -eq 403); $ownerGateDetail = "HTTP " + $code }
+        } catch { $ownerGateDetail = $_.Exception.Message }
+        Add-Result "price update requires the on-chain owner (403 for non-owner)" $ownerGateOk $ownerGateDetail
+        if (-not $ownerGateOk) { $e2eFailed++ }
+
+Add-Result 'live end-to-end DeepSeek flow' ($e2eFailed -eq 0) ('failures=' + $e2eFailed + '; details in logs/e2e.log')
+    } else {
+        Add-Result 'live end-to-end DeepSeek flow' $false 'hub is not healthy'
+    }
+}
+
+
+Write-Host ''
+$errOut = Join-Path $LogDir 'errors.log'
+Set-Content -Path $errOut -Value ('Neural Hive aggregated error log ' + (Get-Date).ToString('s'))
+foreach ($ef in (Get-ChildItem -Path $LogDir -Filter '*.err.log' -ErrorAction SilentlyContinue)) {
+    $content = Get-Content $ef -ErrorAction SilentlyContinue
+    if ($content) { Add-Content -Path $errOut -Value ('--- ' + $ef.Name + ' ---'); $content | Add-Content -Path $errOut }
+}
+Write-Host '================ SUMMARY ================' -ForegroundColor Magenta
+foreach ($r in $script:Results) {
+    $colour = 'Red'; if ($r.Ok) { $colour = 'Green' }
+    $tag = '[FAIL]'; if ($r.Ok) { $tag = '[PASS]' }
+    Write-Host ($tag.PadRight(7) + $r.Stage.PadRight(52) + $r.Detail) -ForegroundColor $colour
+}
+Write-Host ''
+$running = @($script:Started | Where-Object { -not $_.HasExited })
+if ($script:Failed -eq 0) {
+    Write-Host ('ALL CHECKS PASSED (' + $script:Results.Count + ' checks)') -ForegroundColor Green
+} else {
+    Write-Host ('WARNING: ' + $script:Failed + ' of ' + $script:Results.Count + ' checks FAILED') -ForegroundColor Red
+}
+Write-Host ''
+Write-Host ('Running processes: ' + $running.Count) -ForegroundColor Cyan
+Write-Host 'Endpoints:' -ForegroundColor Cyan
+Write-Host ('  Frontend (Hub UI):    ' + $HubUrl + '/') -ForegroundColor Cyan
+Write-Host ('  Hub API:             ' + $HubUrl + '/agents  ' + $HubUrl + '/network  ' + $HubUrl + '/payment/config') -ForegroundColor DarkGray
+Write-Host '  Pay with MetaMask:   network RPC http://127.0.0.1:8545, chain id 1337; the UI connects MetaMask and sends HIVE when you press Send' -ForegroundColor Cyan
+Write-Host ('  Backend coordinator: ' + $CoordinatorUrl + '/health  ' + $CoordinatorUrl + '/agents') -ForegroundColor DarkGray
+Write-Host ('  Relayer:             ' + $RelayerUrl + '/health') -ForegroundColor DarkGray
+Write-Host ('  DeepSeek agents:     ' + (($script:Roster | ForEach-Object { 'http://127.0.0.1:' + $_.Port }) -join '  ')) -ForegroundColor DarkGray
+Write-Host 'Logs under logs/: hub.out.log hub.err.log backend.out.log backend.err.log relayer.out.log' -ForegroundColor DarkGray
+Write-Host '                  deepseek-agent-XX.out.log (one per DeepSeek agent) frontend.log e2e.log' -ForegroundColor DarkGray
+Write-Host ''
+if ($NoStart) {
+    foreach ($p in $script:Started) { try { $p.Kill() } catch { } }
+    Write-Host 'services stopped (-NoStart)' -ForegroundColor DarkGray
+}
+if ($script:Failed -gt 0) { exit 1 }
+exit 0

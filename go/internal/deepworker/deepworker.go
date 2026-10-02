@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,16 +28,26 @@ import (
 // DefaultSystemPrompt is the system prompt every Neural Hive DeepSeek worker runs with unless
 // overridden, so the whole pool reasons with the same house style.
 const DefaultSystemPrompt = "You are a specialist worker inside Neural Hive, a verified multi-agent " +
-	"network. You receive one focused subtask and answer it directly, accurately and concisely. " +
-	"Prefer short paragraphs and lists, stay strictly on the assigned subtask, and say plainly when " +
-	"you are unsure instead of inventing facts."
+	"network. You take part in a continuing conversation: the turns that precede the current " +
+	"subtask are the real earlier messages of this conversation and are the source of truth " +
+	"about the user (for example their name, preferences and any facts they stated). When the user " +
+	"asks something already established earlier, such as their name, answer from that earlier " +
+	"context instead of saying you were never told. You receive one focused subtask and answer " +
+	"it directly, accurately and concisely. Prefer short paragraphs and lists, stay on the " +
+	"assigned subtask, and say plainly when you are unsure instead of inventing facts."
 
 // TaskRequest is one subtask dispatched by the Hub to an agent instance.
+type ChatTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 type TaskRequest struct {
-	SubTaskID string   `json:"subTaskId"`
-	TaskID    string   `json:"taskId"`
-	Prompt    string   `json:"prompt"`
-	Require   []string `json:"requireTags,omitempty"`
+	SubTaskID string     `json:"subTaskId"`
+	TaskID    string     `json:"taskId"`
+	Prompt    string     `json:"prompt"`
+	Require   []string   `json:"requireTags,omitempty"`
+	History   []ChatTurn `json:"history,omitempty"`
 }
 
 // TaskResponse is an agent answer plus the provenance the Hub records in the execution trace.
@@ -128,9 +139,9 @@ func (s *Server) Configured() bool {
 
 // Answer runs one generation and stamps the provenance. A provider error is returned unchanged so
 // the Hub can surface the real reason; nothing is fabricated.
-func (s *Server) Answer(ctx context.Context, prompt string) (*TaskResponse, error) {
+func (s *Server) Answer(ctx context.Context, prompt string, history []ChatTurn) (*TaskResponse, error) {
 	start := time.Now()
-	res, err := s.wrapper.Ask(ctx, prompt)
+	res, err := s.answerWithHistory(ctx, prompt, history)
 	finish := time.Now()
 	s.mu.Lock()
 	s.latency += finish.Sub(start).Milliseconds()
@@ -156,6 +167,27 @@ func (s *Server) Answer(ctx context.Context, prompt string) (*TaskResponse, erro
 		FinishedAt: finish.UTC().Format(time.RFC3339Nano),
 		LatencyMs:  finish.Sub(start).Milliseconds(),
 	}, nil
+}
+
+// answerWithHistory builds a multi-turn conversation from the forwarded chat history (bounded
+// by the Hub) followed by the current subtask prompt, so an agent answers with the user context.
+func (s *Server) answerWithHistory(ctx context.Context, prompt string, history []ChatTurn) (*llm.Result, error) {
+	if len(history) == 0 {
+		return s.wrapper.Ask(ctx, prompt)
+	}
+	msgs := make([]llm.Message, 0, len(history)+1)
+	for _, h := range history {
+		role := h.Role
+		if role != llm.RoleUser && role != llm.RoleAssistant && role != llm.RoleSystem {
+			continue
+		}
+		if strings.TrimSpace(h.Content) == "" {
+			continue
+		}
+		msgs = append(msgs, llm.Message{Role: role, Content: h.Content})
+	}
+	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: prompt})
+	return s.wrapper.Chat(ctx, msgs)
 }
 
 // Stats is the observable counter set of one worker.
@@ -205,14 +237,14 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 			return
 		}
-		log.Printf("hive-agent %s port=%d RECEIVED subtask=%s task=%s tags=%v requireTags=%v", s.cfg.ID, s.cfg.Port, req.SubTaskID, req.TaskID, s.cfg.Tags, req.Require)
+		log.Printf("hive-agent %s port=%d RECEIVED subtask=%s task=%s tags=%v requireTags=%v historyTurns=%d", s.cfg.ID, s.cfg.Port, req.SubTaskID, req.TaskID, s.cfg.Tags, req.Require, len(req.History))
 		timeout := s.cfg.Timeout
 		if timeout <= 0 {
 			timeout = 120 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
-		resp, err := s.Answer(ctx, req.Prompt)
+		resp, err := s.Answer(ctx, req.Prompt, req.History)
 		if err != nil {
 			log.Printf("hive-agent %s port=%d subtask=%s task=%s FAILED: %v", s.cfg.ID, s.cfg.Port, req.SubTaskID, req.TaskID, err)
 			writeJSON(w, http.StatusBadGateway, map[string]interface{}{"error": err.Error()})

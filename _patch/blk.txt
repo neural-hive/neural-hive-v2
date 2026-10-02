@@ -1,0 +1,52 @@
+
+        # --- settlement: the hub keeps its fee and pays the serving agents on chain ---
+        $lastResult = $null
+        try {
+            $tl = Invoke-RestMethod -Uri ($HubUrl + "/history") -TimeoutSec 15
+            if ($tl.tasks -and $tl.tasks.Count -gt 0) { $lastResult = $tl.tasks[0] }
+        } catch {}
+        $settleOk = $false; $settleDetail = ""
+        try {
+            if ($lastResult -and $lastResult.taskId) {
+                $tr = Invoke-RestMethod -Uri ($HubUrl + "/trace/" + [uri]::EscapeDataString($lastResult.taskId)) -TimeoutSec 15
+                if ($tr.settlement) {
+                    $po = @($tr.settlement.payouts | Where-Object { $_.txHash })
+                    $settleOk = ($tr.settlement.ok -and $tr.settlement.agents -ge 1 -and $po.Count -ge 1)
+                    $settleDetail = "fee=" + $tr.settlement.feeHive + " (" + $tr.settlement.feePercent + "%) agents=" + $tr.settlement.agents + " paid=" + $po.Count + " treasury=" + $tr.settlement.treasury
+                } else { $settleDetail = "no settlement object on the trace" }
+            } else { $settleDetail = "no completed task found" }
+        } catch { $settleDetail = $_.Exception.Message }
+        Add-Result "hub fee split paid the serving agents on chain" $settleOk $settleDetail
+        if (-not $settleOk) { $e2eFailed++ }
+
+        # --- each agent has its own wallet that holds HIVE and can be withdrawn by the owner ---
+        $walletOk = $false; $walletDetail = ""
+        try {
+            $first = $script:Roster[0]
+            $w = Invoke-RestMethod -Uri ($HubUrl + "/agents/" + [uri]::EscapeDataString($first.Id) + "/wallet") -TimeoutSec 20
+            $walletOk = [bool]($w.wallet -and $w.owner)
+            $walletDetail = "wallet=" + $w.wallet + " balance=" + $w.balanceHive + " HIVE owner=" + $w.owner
+        } catch { $walletDetail = $_.Exception.Message }
+        Add-Result "agent has its own HIVE wallet and an owner" $walletOk $walletDetail
+        if (-not $walletOk) { $e2eFailed++ }
+
+        # --- chat history: a request carrying prior turns is accepted and answered ---
+        $histOk = $false; $histDetail = ""
+        try {
+            $hb = @{ task = "What did we just discuss?"; history = @(@{ role = "user"; content = "Explain distributed consensus." }, @{ role = "assistant"; content = "It is agreement among nodes." }) } | ConvertTo-Json -Compress -Depth 5
+            $hr = Invoke-RestMethod -Uri ($HubUrl + "/task") -Method Post -ContentType "application/json" -Headers @{ "X-Hive-Selftest" = $script:SelfTestToken } -Body $hb -TimeoutSec 360
+            $histOk = [bool]($hr.answer -and $hr.answer.Length -gt 0)
+            $histDetail = "answered with " + ([string]$hr.answer).Length + " chars"
+        } catch { $histDetail = $_.Exception.Message }
+        Add-Result "request with chat history is accepted and answered" $histOk $histDetail
+        if (-not $histOk) { $e2eFailed++ }
+
+        # --- price update is owner-only: a non-owner is refused ---
+        $ownerGateOk = $false; $ownerGateDetail = ""
+        try {
+            $first2 = $script:Roster[0]
+            $pb = @{ priceHive = 2; txHash = ("0x" + ("0" * 64)); from = "0x000000000000000000000000000000000000dEaD" } | ConvertTo-Json -Compress
+            try { $null = Invoke-RestMethod -Uri ($HubUrl + "/agents/" + [uri]::EscapeDataString($first2.Id) + "/price") -Method Post -ContentType "application/json" -Body $pb -TimeoutSec 15; $ownerGateDetail = "non-owner price update was accepted" } catch { $code = 0; if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }; $ownerGateOk = ($code -eq 403); $ownerGateDetail = "HTTP " + $code }
+        } catch { $ownerGateDetail = $_.Exception.Message }
+        Add-Result "price update requires the on-chain owner (403 for non-owner)" $ownerGateOk $ownerGateDetail
+        if (-not $ownerGateOk) { $e2eFailed++ }

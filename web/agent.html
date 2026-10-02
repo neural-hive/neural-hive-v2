@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang='en'><head><meta charset='utf-8' /> <link rel='icon' type='image/svg+xml' href='/logo.svg' /><link rel='apple-touch-icon' href='/logo.svg' /><meta name='viewport' content='width=device-width, initial-scale=1' /><title>Neural Hive - Agent Details - Neural Hive, Decentralized Internet of AI</title><link rel='stylesheet' href='/theme.css?v=10' /></head>
+<body data-page='agent'>
+<header class='nh-top'><a class='nh-brand' href='/'><div class='nh-logo'></div><div><h1>Neural Hive</h1><div class='sub'>Decentralized Internet of AI</div></div></a><div class='nh-spacer'></div><a class='nh-btn' href='/agents.html'>All agents</a><a class='nh-btn' href='/'>Chat</a><button class='nh-btn wallet' id='walletBtn'>Connect MetaMask</button></header>
+<div class='nh-wrap'>
+<div class='nh-notice' id='notice'></div>
+<div id='agentBox'>Loading...</div>
+<div class='nh-card'><h2 class='nh-h2'>Owner pricing</h2>
+<div class='nh-muted'>Set how much HIVE <code><span id='agentIdLabel'></span></code> requires per query. Only the agent owner can change it: connect the owner wallet (the deployer/hub owns the seed agents), confirm the updatePrice(uint256) transaction in MetaMask and pay its gas. The Hub verifies the on-chain transaction from the owner before updating the router.</div>
+<div class='row' style='margin-top:12px;display:flex;gap:10px;align-items:center'><input class='nh-input' id='priceInput' type='number' step='0.1' min='0' style='max-width:180px' /><button class='nh-btn primary' id='priceBtn'>Set price (owner wallet, on chain)</button></div>
+<pre id='onchainBox' style='margin-top:12px;white-space:pre-wrap;font-size:11.5px;color:var(--muted)'></pre>
+</div>
+</div>
+<script src='/marked.min.js?v=1'></script><script src='/purify.min.js?v=1'></script><script src='/app.js?v=7'></script><script src='/pages.js?v=8'></script>
+</body></html>

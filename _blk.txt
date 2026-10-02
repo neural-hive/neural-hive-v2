@@ -1,0 +1,22 @@
+  // toMetaData returns a PLAIN serializable object (no DOM nodes), so the assistant reply
+  // and its execution metadata survive JSON into localStorage and can be rebuilt on refresh.
+  function toMetaData(r){
+    var a=r.algorithms||{}; var c=r.cost||{};
+    return { complexity:(r.complexity||{}).level||null, agentsUsed:r.agentsUsed||[],
+      routing:(a.routeModeUsed||a.routing||null), aggregation:a.aggregation||null,
+      costHive:(c.totalHive!=null?c.totalHive:null), answerHash:r.answerHash||null,
+      anchor:r.anchor||null, payment:r.payment||null, taskId:r.taskId||null };
+  }
+  // renderMeta rebuilds the visible execution-details block from the persisted plain object.
+  function renderMeta(md){
+    if(!md||typeof md!==~object~){ return null; }
+    var box=el(~div~,~nh-muted~); box.style.marginTop=~12px~; box.style.borderTop=~1px solid var(--line2)~; box.style.paddingTop=~10px~;
+    function line(parts){ var d=el(~div~); for(var i=0;i<parts.length;i++){ d.appendChild(parts[i]); } box.appendChild(d); return d; }
+    function b(t){ return el(~b~,null,t); } function tx(s){ return document.createTextNode(s); }
+    line([b(~Complexity ~),tx(md.complexity||~-~),tx(~  -  Agents ~),tx((md.agentsUsed||[]).join(~, ~))]);
+    line([b(~Routing ~),tx(md.routing||~selfish~),tx(~  -  Aggregation ~),tx(md.aggregation||~-~),tx(~  -  Cost ~),tx(md.costHive!=null?md.costHive:~-~),tx(~ HIVE~)]);
+    if(md.answerHash){ line([b(~Answer hash ~),tx(md.answerHash)]); }
+    if(md.anchor){ line([b(~On-chain anchor ~),tx(md.anchor.ok?~yes~:~no~),tx(~ ~),tx(md.anchor.requestTx||~~)]); }
+    if(md.payment){ line([b(~Payment ~),tx((md.payment.paidHive||~0~)+~ HIVE ~),tx(md.payment.mode||~~),tx(~ ~),tx(md.payment.txHash||~~)]); }
+    if(md.taskId){ var a2=el(~a~,~btn~,~Open Execution Details~); a2.href=~/execution.html?id=~+encodeURIComponent(md.taskId); a2.target=~_blank~; a2.style.marginTop=~8px~; box.appendChild(a2); }
+    return box; }

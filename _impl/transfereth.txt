@@ -1,0 +1,36 @@
+// TransferEth sends native ETH (gas) to an address, retrying once on a stale nonce so it never
+// fails because another Neural Hive process consumed a nonce first.
+func (c *Client) TransferEth(to common.Address, wei *big.Int) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if lastErr = c.transferEthOnce(to, wei); lastErr == nil || !isNonceError(lastErr) {
+			return lastErr
+		}
+		c.mu.Lock()
+		c.nonce = 0
+		c.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+	return lastErr
+}
+
+func (c *Client) transferEthOnce(to common.Address, wei *big.Int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	nonce, err := c.nextNonce()
+	if err != nil {
+		return err
+	}
+	tx := types.NewTransaction(nonce, to, wei, 21_000, big.NewInt(2_000_000_000), nil)
+	signed, err := types.SignTx(tx, types.LatestSignerForChainID(c.ChainID), c.Key)
+	if err != nil {
+		return err
+	}
+	if err := c.Eth.SendTransaction(ctx, signed); err != nil {
+		return err
+	}
+	c.nonce = nonce + 1
+	return nil
+}

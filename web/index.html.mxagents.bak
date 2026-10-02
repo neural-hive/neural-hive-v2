@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' /> <link rel='icon' type='image/svg+xml' href='/logo.svg' /><link rel='apple-touch-icon' href='/logo.svg' />
+<meta name='viewport' content='width=device-width, initial-scale=1' />
+<title>Neural Hive - Decentralized Internet of AI</title>
+<link rel='stylesheet' href='/theme.css?v=6' />
+<style>
+.nh-shell{display:grid;grid-template-columns:250px minmax(0,1fr) 300px;gap:0;width:100%;height:calc(100vh - 59px);align-items:stretch}
+@media (max-width:1180px){.nh-shell{grid-template-columns:250px 1fr}.nh-aside{display:none}}
+@media (max-width:860px){.nh-shell{grid-template-columns:1fr}.nh-side,.nh-aside{display:none}}
+.nh-side{border-right:1px solid var(--line2);background:linear-gradient(180deg,rgba(8,12,24,.6),rgba(8,12,24,.25));padding:14px 12px;display:flex;flex-direction:column;gap:10px;height:100%;overflow:auto}
+.nh-side h3{margin:0;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.nh-newbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-radius:11px;border:1px solid rgba(124,92,255,.5);background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.22));color:var(--ink);font:inherit;font-weight:700;font-size:14.5px;cursor:pointer}
+.nh-newbtn:hover{box-shadow:0 0 16px rgba(124,92,255,.3)}
+.nh-threads{display:flex;flex-direction:column;gap:4px}
+.nh-thread{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;border:1px solid transparent;cursor:pointer;font-size:14.5px;color:var(--muted)}
+.nh-thread:hover{border-color:var(--line);background:rgba(122,142,205,.06)}
+.nh-thread.active{border-color:rgba(124,92,255,.6);background:rgba(124,92,255,.12);color:var(--ink)}
+.nh-thread .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nh-thread .x{opacity:.45;font-size:14px;line-height:1}
+.nh-thread .x:hover{opacity:1;color:var(--bad)}
+.nh-main{min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden;background:radial-gradient(900px 400px at 50% 0%,rgba(91,124,250,.07),transparent 70%)}
+.nh-aside{border-left:1px solid var(--line2);background:linear-gradient(180deg,rgba(8,12,24,.55),rgba(8,12,24,.2));padding:16px 14px 40px;height:100%;overflow:auto}
+.nh-aside .nh-select,.nh-aside .nh-input{width:100%}
+.chat-wrap{width:100%;flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;scroll-behavior:smooth;padding:0 clamp(14px,3vw,32px)}
+.chat-wrap::-webkit-scrollbar{width:10px}.chat-wrap::-webkit-scrollbar-thumb{background:rgba(122,142,205,.22);border-radius:8px;border:3px solid transparent;background-clip:content-box}
+.thread{display:flex;flex-direction:column;gap:30px;flex:1 0 auto;width:100%;max-width:780px;margin:0 auto;padding:34px 0 24px}
+.nh-msg{display:flex;flex-direction:column;width:100%}
+.bubble-user{align-self:flex-end;max-width:80%;width:fit-content;padding:12px 18px;border-radius:22px 22px 6px 22px;background:linear-gradient(135deg,rgba(91,124,250,.30),rgba(168,85,247,.22));border:1px solid rgba(122,142,205,.28);font-size:16.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.answer{display:flex;gap:14px;align-items:flex-start;align-self:stretch;width:100%;padding:0}
+.answer::before{content:'';flex:none;width:30px;height:30px;margin-top:2px;border-radius:50%;background:url(/logo.svg) center/70% no-repeat,rgba(122,142,205,.12);border:1px solid var(--line)}
+.answer>.nh-prose,.answer>.nh-ans-body{flex:1;min-width:0}
+.ans-body{flex:1;min-width:0}
+.nh-prose{font-size:17px;line-height:1.78}
+.nh-prose p{margin:0 0 14px}.nh-prose p:last-child{margin-bottom:0}
+.nh-thinking{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:15.5px;padding-top:5px}
+.composer{position:sticky;bottom:0;flex:none;z-index:5;margin-top:auto;background:linear-gradient(180deg,rgba(7,10,20,0),rgba(7,10,20,.94) 38%);padding:18px 0 20px}
+.composer-box{background:rgba(18,25,46,.92);border:1px solid rgba(122,142,205,.30);border-radius:26px;padding:14px 16px 12px 20px;backdrop-filter:blur(14px);max-width:780px;margin:0 auto;box-shadow:0 18px 50px rgba(0,0,0,.45);transition:border-color .15s,box-shadow .15s}
+.composer-box:focus-within{border-color:rgba(124,92,255,.7);box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 3px rgba(124,92,255,.14)}
+.composer-hint{max-width:780px;margin:8px auto 0;text-align:center;font-size:12.5px;color:var(--faint)}
+textarea{width:100%;background:transparent;border:none;outline:none;color:var(--ink);font:inherit;font-size:16.5px;line-height:1.55;resize:none;min-height:30px;max-height:200px;padding:4px 0}
+textarea::placeholder{color:var(--faint)}
+.row{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.side-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:14px}
+.side-card h3{margin:0 0 10px;font-size:13.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.nh-minitable{width:100%;border-collapse:collapse;font-size:12px;margin:2px 0}.nh-minitable th{text-align:left;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;font-size:9.5px;padding:6px 6px;border-bottom:1px solid var(--line2);font-weight:600}.nh-minitable td{padding:6px 6px;border-bottom:1px solid var(--line2);white-space:nowrap}.nh-minitable tr:last-child td{border-bottom:none}.nh-minitable .dot{display:inline-block;margin-right:4px}.nh-minitable td .nh-bal{font-size:11px}.agent-mini{display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid var(--line2);font-size:12.4px}
+.agent-mini:last-child{border-bottom:none}.agent-mini .n{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}.dot.ok{background:var(--ok);box-shadow:0 0 9px var(--ok)}.dot.bad{background:var(--bad)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);font:inherit;font-size:12.2px;font-weight:600;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:rgba(124,92,255,.6)}.btn.send{background:var(--grad);color:#080c18;border:none;padding:9px 22px;font-weight:700;border-radius:999px}.btn.send:disabled{opacity:.5;cursor:not-allowed}.btn.ghost{background:transparent}.btn.full{width:100%;justify-content:center}
+.empty{margin:auto;padding:12vh 10px 4vh;text-align:center;color:var(--muted);max-width:560px;line-height:1.6}
+.empty .big{font-size:32px;font-weight:700;margin-bottom:12px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+</style>
+</head>
+
+<body>
+<header class='nh-top'>
+  <a class='nh-brand' href='/'><div class='nh-logo'></div><div><h1>Neural Hive</h1><div class='sub'>Decentralized Internet of AI</div></div></a>
+  <div class='nh-spacer'></div>
+  <div class='nh-muted' id='faucetBox' style='display:flex;gap:8px;align-items:center'>
+    <button class='nh-btn' id='faucetBtn' title='Get test HIVE on the devnet'>Faucet</button>
+  </div>
+  <a class='nh-btn' href='/agents.html'>Agents</a>
+  <a class='nh-btn primary' href='/add-agent.html'>+ Add Agent</a>
+  <button class='nh-btn wallet' id='walletBtn'>Connect MetaMask</button>
+</header>
+<div class='nh-notice' id='notice' style='margin:12px 22px 0'></div>
+<div class='nh-shell'>
+  <aside class='nh-side'>
+    <button class='nh-newbtn' id='newChat'>+ New chat</button>
+    <h3>Conversations</h3>
+    <div class='nh-threads' id='threadList'></div>
+    <div class='nh-spacer'></div>
+    <a class='btn full' href='/agents.html'>All agents</a>
+    <a class='btn full' href='/add-agent.html'>+ Add agent</a>
+  </aside>
+  <main class='nh-main'>
+    <div class='chat-wrap'>
+      <div class='thread' id='thread'></div>
+      <div class='composer'>
+        <div class='composer-box'>
+          <textarea id='input' rows='1' placeholder='Message Neural Hive...'></textarea>
+          <div class='row'>
+            <span class='nh-muted' id='costHint'>Loading price...</span>
+            <div style='flex:1'></div>
+            
+            <button class='btn' id='estimateBtn'>Estimate cost</button>
+            <button class='btn send' id='send'>Send</button>
+          </div>
+        </div>
+        <div class='composer-hint'>Enter to send &middot; Shift+Enter for a new line &middot; each request is paid in HIVE via MetaMask</div>
+      </div>
+    </div>
+  </main>
+  <aside class='nh-aside'>
+        <div class='side-card' id='memoryCard'>
+      <h3>Conversation memory</h3>
+      <p class='nh-muted' style='margin:0 0 8px;font-size:13.5px;line-height:1.4'>How many earlier messages are sent to the agents so they remember the conversation.</p>
+      <select class='nh-select' id='historyLimit' title='How many prior messages are sent to the agents so they remember the conversation'>
+        <option value='5'>Last 5 messages</option>
+        <option value='10'>Last 10 messages</option>
+        <option value='20'>Last 20 messages</option>
+        <option value='-1'>Entire conversation</option>
+      </select>
+    </div>
+<div class='side-card'>
+      <h3>Agent pool</h3>
+      <div id='agentList'><div class='nh-muted'>loading...</div></div>
+      <a class='btn full' href='/agents.html' style='margin-top:10px'>See all agents</a>
+    </div>
+    <div class='side-card'>
+      <h3>Routing &amp; aggregation</h3>
+      <label class='nh-label'>Routing</label>
+      <select class='nh-select' id='routing'><option value='selfish'>Selfish routing (4.2.2)</option><option value='linucb'>LinUCB bandit (4.2.3)</option></select>
+      <div style='height:8px'></div>
+      <label class='nh-label'>Aggregation</label>
+      <select class='nh-select' id='aggregation'><option value='mean'>Mean</option><option value='majority'>Majority vote</option><option value='krum'>Krum (4.2.5)</option><option value='multi-krum'>Multi-Krum</option></select>
+      <div style='height:8px'></div>
+      <label class='nh-label'>Byzantine nodes</label>
+      <input class='nh-input' id='byzantine' type='number' min='0' max='5' value='0' />
+    </div>
+    <div class='side-card'>
+      <h3>Network</h3>
+      <div class='nh-muted' id='net'>connecting...</div>
+    </div>
+  </aside>
+</div>
+<script src='/marked.min.js?v=1'></script>
+<script src='/purify.min.js?v=1'></script>
+<script src='/app.js?v=6'></script>
+<script src='/chat.js?v=6'></script>
+</body>
+</html>
+
