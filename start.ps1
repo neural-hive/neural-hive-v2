@@ -60,7 +60,7 @@ $WebDir = Join-Path $Root 'web'
 $LogDir = Join-Path $Root 'logs'
 
 $RpcUrl = 'http://127.0.0.1:8545'
-$ChainIdHex = '0x539'
+$ChainIdHex = '0x7a69'
 
 $HubPort = 9500
 $CoordinatorPort = 9200

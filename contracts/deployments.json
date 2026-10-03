@@ -1,16 +1,16 @@
 {
   "network": "ganache",
-  "admin": "0xfa279Eb24bAAb8b0C934082626019dB42177e563",
-  "deployedAt": "2026-10-02T21:52:46.647Z",
+  "admin": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "deployedAt": "2026-10-03T07:14:15.995Z",
   "protocolFeeBps": 700,
   "contracts": {
-    "HiveToken": "0x8CD942CaB286cEb22488629F43845259982b457D",
-    "CapabilityRegistry": "0xd29E4B4230f4a2AcC931fBf60C13AB08b7db1306",
-    "ReputationRegistry": "0xa9370110b367A3053682c2CD2FBFeb676b469ABE",
-    "StakingSettlement": "0xE6D3ab085eF2856812a4a7149454f23D9C3E6d9A",
-    "TaskCoordinator": "0x1ded01401BEd21FC1041C5FbAA0b0bF47F03A04A",
-    "HiveSnowball": "0x9A5ce6681DB7F17E3a5eDbAdf6ED789D1199F740",
-    "MockTeleporterMessenger": "0x44978282fE813E2EEB00e3D1870d7607FBDB7890",
-    "AgentWalletFactory": "0x638011F06A73809E970f2cE004867954912A12f7"
+    "HiveToken": "0xD0141E899a65C95a556fE2B27e5982A6DE7fDD7A",
+    "CapabilityRegistry": "0x07882Ae1ecB7429a84f1D53048d35c4bB2056877",
+    "ReputationRegistry": "0x22753E4264FDDc6181dc7cce468904A80a363E44",
+    "StakingSettlement": "0xA7c59f010700930003b33aB25a7a0679C860f29c",
+    "TaskCoordinator": "0xfaAddC93baf78e89DCf37bA67943E1bE8F37Bb8c",
+    "HiveSnowball": "0x276C216D241856199A83bf27b2286659e5b877D3",
+    "MockTeleporterMessenger": "0x3347B4d90ebe72BeFb30444C9966B2B990aE9FcB",
+    "AgentWalletFactory": "0x3155755b79aA083bd953911C92705B7aA82a18F9"
   }
 }

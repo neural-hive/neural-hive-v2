@@ -1,0 +1,42 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "ITeleporterMessenger",
+  "sourceName": "contracts/interfaces/ITeleporterMessenger.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "destinationBlockchainID",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "address",
+          "name": "destination",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "requestId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "answerHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "sendCrossChainAnswer",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/interfaces/ITeleporterMessenger.sol",
+  "buildInfoId": "solc-0_8_20-49ddc97f78736bec0c762c83544c7ce0e22ad3d4"
+}

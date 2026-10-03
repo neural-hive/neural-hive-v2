@@ -1,0 +1,37 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "ITeleporterReceiver",
+  "sourceName": "contracts/interfaces/ITeleporterReceiver.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "sourceBlockchainID",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "address",
+          "name": "originSenderAddress",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes",
+          "name": "message",
+          "type": "bytes"
+        }
+      ],
+      "name": "receiveTeleporterMessage",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/interfaces/ITeleporterReceiver.sol",
+  "buildInfoId": "solc-0_8_20-49ddc97f78736bec0c762c83544c7ce0e22ad3d4"
+}

@@ -1,0 +1,13 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "AttestationLib",
+  "sourceName": "contracts/libraries/AttestationLib.sol",
+  "abi": [],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea2646970667358221220929a96b1662a8274f22ca9fb8b5c234eed62c668778e0fd081b845f3f57d794164736f6c63430008140033",
+  "deployedBytecode": "0x5f80fdfea2646970667358221220929a96b1662a8274f22ca9fb8b5c234eed62c668778e0fd081b845f3f57d794164736f6c63430008140033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/AttestationLib.sol",
+  "buildInfoId": "solc-0_8_20-49ddc97f78736bec0c762c83544c7ce0e22ad3d4"
+}
