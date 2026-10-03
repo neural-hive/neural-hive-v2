@@ -22,7 +22,10 @@ loadEnv(path.join(__dirname, "..", ".env"));
 loadEnv(path.join(__dirname, ".env"));
 
 const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
+// console.log(RPC_URL)
+
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || "1337", 10);
+// console.log(CHAIN_ID)
 const KEYS = [process.env.PRIVATE_KEY_1, process.env.PRIVATE_KEY_2].filter(Boolean);
 
 module.exports = {
@@ -37,11 +40,26 @@ module.exports = {
       gas: 8000000,
       gasPrice: 2000000000
     },
-    avalanche: {
+ avalanche: {
+      // 🔽 2. Only create the provider if it doesn't exist yet (Singleton Pattern)
       provider: function () {
-        return new HDWalletProvider({ privateKeys: KEYS, providerOrUrl: RPC_URL });
+        if (!global.avalancheProviderInstance) {
+            global.avalancheProviderInstance = new HDWalletProvider({ 
+            privateKeys: KEYS, 
+            providerOrUrl: RPC_URL, 
+            pollingInterval: 15000, 
+            disableBlockTracker: true  // Keeps the tracker off
+          });
+        }
+        return global.avalancheProviderInstance;
       },
       network_id: "*",
+      networkCheckTimeout: 999999,      
+      deploymentPollingInterval: 15000,  
+      gas: 7500000,
+      gasPrice: 22500000000,
+      gasMultiplier: 2.5,               // Keeps our gas fix intact
+      confirmations: 0,                 // Prevents waiting for empty blocks
       skipDryRun: true
     }
   },

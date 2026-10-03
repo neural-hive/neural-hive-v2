@@ -1,0 +1,30 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "Krum",
+  "sourceName": "contracts/libraries/Krum.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "n",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "f",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotEnoughResponses",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea264697066735822122057bdae9b306299912a9e620f17728836fae7a4793876304c3b7ed351c57ebea764736f6c63430008140033",
+  "deployedBytecode": "0x5f80fdfea264697066735822122057bdae9b306299912a9e620f17728836fae7a4793876304c3b7ed351c57ebea764736f6c63430008140033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/Krum.sol",
+  "buildInfoId": "solc-0_8_20-49ddc97f78736bec0c762c83544c7ce0e22ad3d4"
+}
