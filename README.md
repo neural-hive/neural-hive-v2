@@ -103,7 +103,7 @@ Because the migration rewrites `deployments.json`, re-deploying never requires h
 From the repository root:
 
 ```
-powershell -ExecutionPolicy Bypass -File .\start.ps1
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -SkipContractTests, -SkipGoTests, -NoStart
 ```
 
 Useful switches: `-SkipContractTests`, `-SkipGoTests`, `-NoStart` (deploy and test everything but do not leave services running).
